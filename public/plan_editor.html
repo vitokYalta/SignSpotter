@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan Editor</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js`;
+    </script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+        #plan-map { height: 100%; width: 100%; background-color: #e5e7eb; }
+        #plan-map.add-mode-cursor { cursor: crosshair !important; }
+        .leaflet-marker-icon.temp-marker { filter: hue-rotate(150deg) brightness(1.2); }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 10000; display: none; align-items: center; justify-content: center; color: white; font-size: 1.2rem; }
+        #connection-status { position: fixed; bottom: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; }
+        #connection-status.connected { background-color: #22c55e; }
+        #connection-status.disconnected { background-color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay">Please wait...</div>
+    <div class="flex h-screen">
+        <!-- Left Panel -->
+        <div class="w-1/3 max-w-sm bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-xl font-bold text-gray-800">Plan Editor</h1>
+                <a href="/" class="text-sm text-blue-600 hover:underline">Back to Hub</a>
+            </div>
+            
+            <a href="/map-positioner" class="w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg mb-4">Position on Map &rarr;</a>
+            
+            <div>
+                 <h2 class="text-lg font-semibold text-gray-800 mb-2">Plan File</h2>
+                 <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            </div>
+            <hr class="my-4">
+            <div>
+                 <button id="settingsBtn" class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">Project Settings</button>
+            </div>
+            <hr class="my-4">
+            <div id="points-section">
+                <h2 class="text-lg font-semibold text-gray-800">Map Points</h2>
+                <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg" disabled>Activate Add Mode</button>
+                <div id="pointEditorContainer" class="mt-4"></div>
+                <div class="flex-grow flex flex-col min-h-0 mt-4">
+                     <div id="pointListContainer" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2 min-h-[100px]">
+                        <p class="text-center text-gray-500">No points yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Plan Map Area -->
+        <div class="flex-grow">
+            <div id="plan-map"></div>
+        </div>
+    </div>
+    
+    <div id="connection-status">Connecting...</div>
+
+    <!-- Settings Modal (same as before) -->
+    <div id="settingsModal" class="fixed inset-0 z-[1000] flex items-center justify-center hidden">
+        <div id="modalBackdrop" class="fixed inset-0 bg-black bg-opacity-50"></div>
+        <div class="bg-white rounded-lg shadow-xl m-4 sm:max-w-xl sm:w-full relative z-10 max-h-[90vh] flex flex-col">
+            <div class="p-4 border-b"><h3 class="text-lg font-medium text-gray-900">Project Settings</h3></div>
+            <div class="p-4 overflow-y-auto">
+                <h4 class="font-semibold text-gray-800 mb-2">Point Field Builder</h4>
+                <div id="schemaBuilder" class="space-y-3"></div>
+                <button id="addFieldBtn" class="mt-3 text-sm bg-blue-100 hover:bg-blue-200 font-bold py-1 px-3 rounded-lg">+ Add Field</button>
+            </div>
+            <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                 <button id="closeSettingsBtn" class="bg-gray-200 hover:bg-gray-300 font-bold py-2 px-4 rounded-lg">Close</button>
+                 <button id="saveSettingsBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Save & Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // --- GLOBAL STATE ---
+        let planMap, geojsonLayer, planOverlay, tempMarker;
+        let project = {}, geojsonData = { type: "FeatureCollection", features: [] };
+        let addMode = false;
+
+        // --- CONSTANTS ---
+        const IS_PREVIEW = !window.location.host;
+        const WS_HOST = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+
+        // --- UI ELEMENTS ---
+        const ui = {
+            loadingOverlay: document.getElementById('loading-overlay'),
+            connectionStatus: document.getElementById('connection-status'),
+            planMapEl: document.getElementById('plan-map'),
+            planUploader: document.getElementById('planUploader'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            addPointBtn: document.getElementById('addPointBtn'),
+            pointEditorContainer: document.getElementById('pointEditorContainer'),
+            pointListContainer: document.getElementById('pointListContainer'),
+            settingsModal: document.getElementById('settingsModal'),
+            modalBackdrop: document.getElementById('modalBackdrop'),
+            schemaBuilder: document.getElementById('schemaBuilder'),
+            addFieldBtn: document.getElementById('addFieldBtn'),
+            closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+            saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+        };
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            initPlanMap();
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('new') === 'true') {
+                project = { id: 'default', point_schema: [], plan_data_url: null };
+                geojsonData = { type: "FeatureCollection", features: [] };
+                handleProjectUpdate({project, geojsonData});
+                openSettingsModal(true);
+            } else {
+                await loadProjectData();
+            }
+            if (!IS_PREVIEW) setupWebSocket();
+            else ui.connectionStatus.textContent = 'Real-time disabled';
+            setupEventListeners();
+        });
+
+        function initPlanMap() {
+            if (planMap) planMap.remove();
+            planMap = L.map('plan-map', { crs: L.CRS.Simple, minZoom: -5 });
+            planMap.on('click', onMapClick);
+        }
+
+        function onMapClick(e) {
+            if (!addMode) {
+                ui.pointEditorContainer.innerHTML = ''; // Close editor if clicking away
+                return;
+            }
+            if (e.originalEvent.target.classList.contains('leaflet-interactive')) return;
+
+            if (tempMarker) tempMarker.remove();
+            tempMarker = L.marker(e.latlng, { icon: new L.Icon.Default({ className: 'leaflet-marker-icon temp-marker' }) }).addTo(planMap);
+            renderPointEditor(null, e.latlng); // Open editor for a new point
+        }
+
+        // --- DATA & SERVER ---
+        async function loadProjectData() { /* ... same as before ... */ }
+        async function sendSettings(settings) { /* ... same as before ... */ }
+        async function handlePlanUpload(e) { /* ... same as before ... */ }
+
+        // --- PROJECT UPDATE & RENDER ---
+        function handleProjectUpdate(data) {
+             project = data.project;
+             geojsonData = data.geojsonData;
+             if (!project.point_schema) project.point_schema = [];
+             renderPlan();
+             renderPoints();
+             renderPointList();
+        }
+
+        function renderPlan() {
+            if (planOverlay) planOverlay.remove();
+            if (!project.plan_data_url) {
+                ui.addPointBtn.disabled = true;
+                return;
+            }
+            const img = new Image();
+            img.onload = () => {
+                const bounds = [[0, 0], [img.height, img.width]];
+                planOverlay = L.imageOverlay(project.plan_data_url, bounds).addTo(planMap);
+                planMap.fitBounds(bounds);
+            };
+            img.src = project.plan_data_url;
+            ui.addPointBtn.disabled = false;
+        }
+
+        function renderPoints() {
+            if (geojsonLayer) geojsonLayer.remove();
+            geojsonLayer = L.geoJSON(geojsonData, {
+                pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+                    radius: 8, fillColor: feature.properties.Color || "#3388ff",
+                    color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
+                }),
+                onEachFeature: (feature, layer) => {
+                    layer.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        if (addMode) return;
+                        renderPointEditor(feature.properties.id);
+                    });
+                }
+            }).addTo(planMap);
+        }
+
+        // --- POINT MANAGEMENT ---
+        function toggleAddMode() {
+            addMode = !addMode;
+            if (addMode) {
+                ui.addPointBtn.textContent = 'Cancel Adding';
+                ui.addPointBtn.classList.replace('bg-blue-500', 'bg-red-500');
+                ui.planMapEl.classList.add('add-mode-cursor');
+                ui.pointEditorContainer.innerHTML = '';
+                if (tempMarker) tempMarker.remove();
+            } else {
+                ui.addPointBtn.textContent = 'Activate Add Mode';
+                ui.addPointBtn.classList.replace('bg-red-500', 'bg-blue-500');
+                ui.planMapEl.classList.remove('add-mode-cursor');
+                if (tempMarker) tempMarker.remove();
+                tempMarker = null;
+            }
+        }
+        
+        async function savePointFromForm(form, featureId, latlng) { /* ... mostly same as before, but for planMap ... */ }
+        async function deletePoint(featureId) { /* ... same as before ... */ }
+
+        // --- UI & MODALS ---
+        function renderPointEditor(featureId = null, latlng = null) { /* ... same as before, but also handles new points from map click ... */ }
+        function renderPointList() { /* ... same as before, adjusted for planMap ... */ }
+        function openSettingsModal(isNew = false) { /* ... same as before ... */ }
+        function closeSettingsModal() { /* ... same as before ... */ }
+        async function saveSettingsAndContinue() { /* ... same as before, adjusted for workflow ... */ }
+        function renderSchemaBuilder() { /* ... same as before ... */ }
+        function createSchemaFieldRow(field, index) { /* ... same as before ... */ }
+        function addSchemaField() { /* ... same as before ... */ }
+
+        // --- WEBSOCKET ---
+        function setupWebSocket() { /* ... same as before ... */ }
+
+        // --- UTILITIES ---
+        function getFileDataUrl(file) { /* ... same as before ... */ }
+        async function renderPdfToDataUrl(file) { /* ... same as before ... */ }
+        function createFormField(field, value) { /* ... same as before ... */ }
+
+        // Placeholder for full implementations to be filled in
+        async function loadProjectData() { if (IS_PREVIEW) return; try { const r = await fetch('/api/project'); if (!r.ok) throw new Error(r.statusText); const d = await r.json(); handleProjectUpdate(d); } catch (e) { alert('Failed to load project.'); } }
+        async function sendSettings(settings) { if (IS_PREVIEW) return; try { await fetch('/api/project/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) }); } catch (e) { alert('Failed to save settings.'); } }
+        async function handlePlanUpload(e) { const f = e.target.files[0]; if (!f) return; if(IS_PREVIEW) return; ui.loadingOverlay.style.display = 'flex'; try { let d; if (f.type === 'application/pdf') { ui.loadingOverlay.textContent = 'Rendering PDF...'; d = await renderPdfToDataUrl(f); } else { ui.loadingOverlay.textContent = 'Reading image...'; d = { dataUrl: await getFileDataUrl(f) }; } ui.loadingOverlay.textContent = 'Uploading...'; await fetch('/api/project/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planDataUrl: d.dataUrl }) }); } catch (err) { alert(`Upload error: ${err.message}`); } finally { ui.loadingOverlay.style.display = 'none'; ui.planUploader.value = ''; } }
+        function setupEventListeners() { ui.addPointBtn.addEventListener('click', toggleAddMode); ui.planUploader.addEventListener('change', handlePlanUpload); ui.settingsBtn.addEventListener('click', () => openSettingsModal(false)); ui.modalBackdrop.addEventListener('click', closeSettingsModal); ui.closeSettingsBtn.addEventListener('click', closeSettingsModal); ui.saveSettingsBtn.addEventListener('click', saveSettingsAndContinue); ui.addFieldBtn.addEventListener('click', addSchemaField); }
+        function openSettingsModal(isNew = false) { ui.saveSettingsBtn.dataset.isNew = isNew; renderSchemaBuilder(); ui.settingsModal.classList.remove('hidden'); }
+        function closeSettingsModal() { ui.settingsModal.classList.add('hidden'); }
+        async function saveSettingsAndContinue() { const newSchema = []; document.querySelectorAll('#schemaBuilder > div').forEach(row => { const name = row.querySelector('.schema-name').value.trim(); if (name) newSchema.push({ name, type: row.querySelector('.schema-type').value, options: row.querySelector('.schema-options').value.split(',').map(s => s.trim()).filter(Boolean) }); }); project.point_schema = newSchema; if (!IS_PREVIEW) await sendSettings({ point_schema: newSchema }); closeSettingsModal(); if (ui.saveSettingsBtn.dataset.isNew === 'true') setTimeout(() => alert("Project created! Now, please upload a plan file to begin."), 100); }
+        function renderSchemaBuilder() { ui.schemaBuilder.innerHTML = ''; (project.point_schema || []).forEach((field, index) => ui.schemaBuilder.appendChild(createSchemaFieldRow(field, index))); }
+        function createSchemaFieldRow(field, index) { const div = document.createElement('div'); div.className = 'grid grid-cols-3 gap-2 items-center p-2 border rounded'; div.innerHTML = `<input type="text" value="${field.name}" placeholder="Field Name" class="col-span-1 p-1 border rounded schema-name"><select class="col-span-1 p-1 border rounded schema-type"><option value="text" ${field.type === 'text' ? 'selected' : ''}>Text</option><option value="textarea" ${field.type === 'textarea' ? 'selected' : ''}>Text Area</option><option value="select" ${field.type === 'select' ? 'selected' : ''}>Dropdown</option><option value="color" ${field.type === 'color' ? 'selected' : ''}>Color</option><option value="date" ${field.type === 'date' ? 'selected' : ''}>Date</option><option value="image" ${field.type === 'image' ? 'selected' : ''}>Image</option></select><div class="flex items-center"><input type="text" value="${(field.options || []).join(',')}" placeholder="Options..." class="flex-grow p-1 border rounded schema-options ${field.type !== 'select' ? 'hidden' : ''}"><button data-index="${index}" class="ml-2 text-red-500 hover:text-red-700 remove-field-btn text-2xl font-bold">&times;</button></div>`; div.querySelector('.schema-type').onchange = (e) => { div.querySelector('.schema-options').classList.toggle('hidden', e.target.value !== 'select'); }; div.querySelector('.remove-field-btn').onclick = (e) => { project.point_schema.splice(e.target.dataset.index, 1); renderSchemaBuilder(); }; return div; }
+        function addSchemaField() { if (!project.point_schema) project.point_schema = []; project.point_schema.push({ name: '', type: 'text', options: [] }); renderSchemaBuilder(); }
+        function renderPointList() { ui.pointListContainer.innerHTML = ''; if (geojsonData.features.length === 0) { ui.pointListContainer.innerHTML = '<p class="text-center text-gray-500">No points to display.</p>'; return; } geojsonData.features.forEach(f => { const item = document.createElement('div'); item.className = 'flex items-center p-2 rounded hover:bg-gray-100 cursor-pointer'; const colorField = project.point_schema.find(field => field.type === 'color'); const color = colorField ? (f.properties[colorField.name] || '#cccccc') : '#cccccc'; const nameField = project.point_schema.find(field => field.name.toLowerCase() === 'name'); const name = nameField ? (f.properties[nameField.name] || 'Untitled Point') : 'Untitled Point'; item.innerHTML = `<div class="w-4 h-4 rounded-full mr-3" style="background-color: ${color}"></div><span>${name}</span>`; item.onclick = () => { if(planMap) planMap.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], planMap.getMaxZoom()); }; ui.pointListContainer.appendChild(item); }); }
+        function renderPointEditor(featureId = null, latlng = null) { let feature = null; if (featureId) feature = geojsonData.features.find(f => f.properties.id === featureId); ui.pointEditorContainer.innerHTML = ''; const form = document.createElement('form'); form.className = 'panel border p-3 rounded-lg bg-gray-50'; const title = document.createElement('p'); title.className = 'text-md font-semibold text-center text-blue-800 p-2 rounded-lg'; title.textContent = featureId ? 'Editing Point' : 'New Point'; form.appendChild(title); (project.point_schema || []).forEach(field => { form.appendChild(createFormField(field, feature ? feature.properties[field.name] : '')); }); const saveBtn = document.createElement('button'); saveBtn.type = 'submit'; saveBtn.className = 'w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg'; saveBtn.textContent = 'Save'; form.appendChild(saveBtn); const cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.className = 'w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg'; cancelBtn.textContent = 'Cancel'; cancelBtn.onclick = () => { ui.pointEditorContainer.innerHTML = ''; if (tempMarker) tempMarker.remove(); if (addMode) toggleAddMode(); }; form.appendChild(cancelBtn); if (featureId) { const deleteBtn = document.createElement('button'); deleteBtn.type = 'button'; deleteBtn.className = 'w-full mt-2 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg'; deleteBtn.textContent = 'Delete Point'; deleteBtn.onclick = async () => { if (confirm('Are you sure?')) { await deletePoint(featureId); ui.pointEditorContainer.innerHTML = ''; } }; form.appendChild(deleteBtn); } form.onsubmit = async (e) => { e.preventDefault(); await savePointFromForm(form, featureId, latlng); }; ui.pointEditorContainer.appendChild(form); }
+        async function savePointFromForm(form, featureId, latlng) { if (IS_PREVIEW) return; const properties = { id: featureId || `feature-${Date.now()}` }; let geometry; for (const field of project.point_schema) { const input = form.querySelector(`[name="${field.name}"]`); if (field.type === 'image') { if (input.files && input.files[0]) properties[field.name] = await getFileDataUrl(input.files[0]); else properties[field.name] = input.dataset.currentImage || null; } else { properties[field.name] = input.value; } } if (featureId) { geometry = geojsonData.features.find(f => f.properties.id === featureId).geometry; } else { geometry = { type: 'Point', coordinates: [latlng.lng, latlng.lat] }; } const feature = { type: "Feature", properties, geometry }; await fetch('/api/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feature) }); ui.pointEditorContainer.innerHTML = ''; if(addMode) toggleAddMode(); }
+        async function deletePoint(featureId) { if (IS_PREVIEW) return; try { await fetch(`/api/points/${featureId}`, { method: 'DELETE' }); } catch (err) { alert(err.message); } }
+        function setupWebSocket() { const ws = new WebSocket(WS_HOST); ws.onopen = () => { ui.connectionStatus.textContent = 'Connected'; ui.connectionStatus.className = 'connected'; }; ws.onmessage = (event) => { const message = JSON.parse(event.data); if (message.type.includes('update') || message.type.includes('delete')) { loadProjectData(); } }; ws.onclose = () => { ui.connectionStatus.textContent = 'Disconnected'; ui.connectionStatus.className = 'disconnected'; setTimeout(setupWebSocket, 3000); }; ws.onerror = () => ws.close(); }
+        function getFileDataUrl(file) { return new Promise((res, rej) => { if (!file) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; return { dataUrl: canvas.toDataURL() }; }
+        function createFormField(field, value) { const container = document.createElement('div'); container.className = 'mt-3'; const label = document.createElement('label'); label.textContent = field.name; label.className = 'block text-sm font-medium text-gray-700'; container.appendChild(label); let input; switch(field.type) { case 'select': input = document.createElement('select'); (field.options || []).forEach(opt => { const option = document.createElement('option'); option.value = opt; option.textContent = opt; if (opt === value) option.selected = true; input.appendChild(option); }); break; case 'textarea': input = document.createElement('textarea'); input.rows = 3; input.value = value || ''; break; case 'image': input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*'; input.dataset.currentImage = value || ''; if (value) { const preview = document.createElement('img'); preview.src = value; preview.className = 'w-16 h-16 mt-1 object-cover rounded'; container.appendChild(preview); } break; default: input = document.createElement('input'); input.type = field.type; input.value = value || ''; } input.id = `field-${field.name}`; input.name = field.name; input.className = 'mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm'; container.appendChild(input); return container; }
+    </script>
+</body>
+</html>
