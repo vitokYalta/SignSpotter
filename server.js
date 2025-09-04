@@ -37,11 +37,11 @@ async function initializeDatabase() {
         plan_height NUMERIC
       );
     `);
-    // The table for points, linked to a project
+    // The table for points, linked to a project with cascading delete
     await client.query(`
       CREATE TABLE IF NOT EXISTS points (
         id VARCHAR(255) PRIMARY KEY,
-        project_id VARCHAR(50) REFERENCES project(id),
+        project_id VARCHAR(50) REFERENCES project(id) ON DELETE CASCADE,
         properties JSONB,
         geometry JSONB
       );
@@ -88,31 +88,36 @@ app.get('/api/project', async (req, res) => {
   }
 });
 
-// POST /api/project/plan - Update the project's plan
+// POST /api/project/plan - Update the project's plan using a transaction
 app.post('/api/project/plan', async (req, res) => {
     const { planDataUrl, width, height } = req.body;
+    const client = await pool.connect();
     try {
-        const client = await pool.connect();
+        await client.query('BEGIN'); // Start transaction
         await client.query(
             'UPDATE project SET plan_data_url = $1, plan_width = $2, plan_height = $3 WHERE id = $4',
             [planDataUrl, width, height, 'default']
         );
-        // Also delete all old points when a new plan is uploaded
         await client.query("DELETE FROM points WHERE project_id = 'default'");
-        client.release();
+        await client.query('COMMIT'); // Commit transaction
+        
         broadcast({ type: 'plan_update', payload: { project: { id: 'default', plan_data_url: planDataUrl, plan_width: width, plan_height: height }, geojsonData: { type: 'FeatureCollection', features: [] } } });
         res.status(200).json({ message: 'Plan updated' });
     } catch (err) {
+        await client.query('ROLLBACK'); // Rollback on error
         console.error('Error updating plan', err.stack);
-        res.status(500).send('Server Error');
+        res.status(500).send('Server Error: ' + err.message);
+    } finally {
+        client.release();
     }
 });
 
 
 // POST /api/points - Create or update a point
 app.post('/api/points', async (req, res) => {
-  const { id, properties, geometry } = req.body;
-  const propertiesToStore = { ...properties };
+  const { id, properties, geometry } = req.body.properties; // Correctly unpack feature
+  const featureId = req.body.properties.id;
+  const propertiesToStore = { ...req.body.properties };
   delete propertiesToStore.id;
 
   const query = `
@@ -124,14 +129,14 @@ app.post('/api/points', async (req, res) => {
   
   try {
     const client = await pool.connect();
-    await client.query(query, [id, propertiesToStore, geometry]);
+    await client.query(query, [featureId, propertiesToStore, req.body.geometry]);
     client.release();
     
     broadcast({ type: 'point_update', payload: req.body });
     res.status(200).json({ message: 'Point saved' });
   } catch (err) {
     console.error('Error saving point', err.stack);
-    res.status(500).send('Server Error');
+    res.status(500).send('Server Error: ' + err.message);
   }
 });
 
@@ -146,7 +151,7 @@ app.delete('/api/points/:id', async (req, res) => {
         res.status(200).json({ message: 'Point deleted' });
     } catch (err) {
         console.error('Error deleting point', err.stack);
-        res.status(500).send('Server Error');
+        res.status(500).send('Server Error: ' + err.message);
     }
 });
 
@@ -164,12 +169,14 @@ app.post('/api/project/import', async (req, res) => {
         // Clear old points
         await client.query("DELETE FROM points WHERE project_id = 'default'");
         // Insert new points
-        for (const feature of geojsonData.features) {
-            const { id, ...properties } = feature.properties;
-            await client.query(
-                'INSERT INTO points (id, project_id, properties, geometry) VALUES ($1, $2, $3, $4)',
-                [id, 'default', properties, feature.geometry]
-            );
+        if (geojsonData && geojsonData.features) {
+            for (const feature of geojsonData.features) {
+                const { id, ...properties } = feature.properties;
+                await client.query(
+                    'INSERT INTO points (id, project_id, properties, geometry) VALUES ($1, $2, $3, $4)',
+                    [id, 'default', properties, feature.geometry]
+                );
+            }
         }
         await client.query('COMMIT'); // Commit transaction
         broadcast({ type: 'project_import', payload: req.body });
