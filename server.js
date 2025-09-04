@@ -14,7 +14,6 @@ const pool = new Pool({
 });
 
 app.use(express.json({ limit: '50mb' }));
-// Serve static files like CSS or client-side JS from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- DATABASE INITIALIZATION ---
@@ -22,7 +21,6 @@ async function initializeDatabase() {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // Main project table (only one row for this app)
         await client.query(`
             CREATE TABLE IF NOT EXISTS project (
                 id TEXT PRIMARY KEY,
@@ -32,7 +30,6 @@ async function initializeDatabase() {
                 opacity REAL DEFAULT 0.7
             );
         `);
-        // Points table
         await client.query(`
             CREATE TABLE IF NOT EXISTS points (
                 id TEXT PRIMARY KEY,
@@ -41,21 +38,16 @@ async function initializeDatabase() {
                 geometry JSONB
             );
         `);
-        // Add columns if they don't exist (migrations)
         const columns = await client.query(`
             SELECT column_name FROM information_schema.columns WHERE table_name = 'project';
         `);
         const colNames = columns.rows.map(r => r.column_name);
         if (!colNames.includes('opacity')) {
             await client.query('ALTER TABLE project ADD COLUMN opacity REAL DEFAULT 0.7;');
-            console.log("Added 'opacity' column to project table.");
         }
-
-        // Ensure a default project exists
         const res = await client.query("SELECT id FROM project WHERE id = 'default'");
         if (res.rowCount === 0) {
             await client.query("INSERT INTO project (id, point_schema) VALUES ('default', '[]'::jsonb)");
-            console.log("Default project created.");
         }
         await client.query('COMMIT');
     } catch (err) {
@@ -74,10 +66,13 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'hub.html'));
 });
 
-app.get('/editor', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'editor.html'));
+app.get('/plan-editor', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'plan_editor.html'));
 });
 
+app.get('/map-positioner', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'map_positioner.html'));
+});
 
 // --- WEBSOCKET BROADCASTING ---
 function broadcast(data) {
@@ -88,9 +83,8 @@ function broadcast(data) {
     });
 }
 
-// --- API ENDPOINTS (No changes needed here) ---
+// --- API ENDPOINTS ---
 
-// Get the entire project state
 app.get('/api/project', async (req, res) => {
     const client = await pool.connect();
     try {
@@ -115,7 +109,6 @@ app.get('/api/project', async (req, res) => {
     }
 });
 
-// Update project settings (schema, corners, opacity)
 app.post('/api/project/settings', async (req, res) => {
     const { point_schema, plan_corners, opacity } = req.body;
     const client = await pool.connect();
@@ -138,13 +131,10 @@ app.post('/api/project/settings', async (req, res) => {
             query += ` opacity = $${valueIndex++}`;
             values.push(opacity);
         }
-
         query += " WHERE id = 'default'";
-        
         if (values.length > 0) {
             await client.query(query, values);
         }
-
         res.sendStatus(200);
         broadcast({ type: 'settings_update' });
     } catch (err) {
@@ -155,7 +145,6 @@ app.post('/api/project/settings', async (req, res) => {
     }
 });
 
-// Upload a new plan (this clears old points)
 app.post('/api/project/plan', async (req, res) => {
     const { planDataUrl } = req.body;
     const client = await pool.connect();
@@ -178,7 +167,6 @@ app.post('/api/project/plan', async (req, res) => {
     }
 });
 
-// Create/Update a point
 app.post('/api/points', async (req, res) => {
     const { properties, geometry } = req.body;
     const { id, ...otherProps } = properties;
@@ -202,7 +190,6 @@ app.post('/api/points', async (req, res) => {
     }
 });
 
-// Delete a point
 app.delete('/api/points/:id', async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
