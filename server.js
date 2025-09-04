@@ -28,13 +28,15 @@ app.use(express.json({ limit: '50mb' }));
 async function initializeDatabase() {
   const client = await pool.connect();
   try {
-    // 1. Create project table if it doesn't exist
+    // 1. Create project table with new columns for schema and plan transformation
     await client.query(`
       CREATE TABLE IF NOT EXISTS project (
         id VARCHAR(50) PRIMARY KEY,
         plan_data_url TEXT,
         plan_width NUMERIC,
-        plan_height NUMERIC
+        plan_height NUMERIC,
+        point_schema JSONB,
+        plan_corners JSONB
       );
     `);
 
@@ -47,24 +49,34 @@ async function initializeDatabase() {
       );
     `);
 
-    // 3. **MIGRATION**: Check if 'project_id' column exists in 'points' table
+    // 3. **MIGRATION**: Check and add 'project_id' column to 'points' table if needed
     const columnCheck = await client.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
+        SELECT column_name FROM information_schema.columns 
         WHERE table_name='points' AND column_name='project_id'
     `);
-
     if (columnCheck.rowCount === 0) {
-        // If column does not exist, add it. This is a safe, one-time operation.
-        console.log('Column "project_id" not found in "points". Adding it now...');
+        console.log('Column "project_id" not found. Adding it...');
         await client.query(`
             ALTER TABLE points 
             ADD COLUMN project_id VARCHAR(50) REFERENCES project(id) ON DELETE CASCADE;
         `);
-        console.log('Column "project_id" added successfully.');
+        console.log('Column "project_id" added.');
+    }
+    
+    // 4. **MIGRATION**: Check and add new columns to 'project' table
+    const projectColumns = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name='project' AND column_name IN ('point_schema', 'plan_corners')
+    `);
+    if (projectColumns.rowCount < 2) {
+        console.log('Project table is outdated. Adding new columns...');
+        await client.query(`ALTER TABLE project ADD COLUMN IF NOT EXISTS point_schema JSONB;`);
+        await client.query(`ALTER TABLE project ADD COLUMN IF NOT EXISTS plan_corners JSONB;`);
+        console.log('Project table updated.');
     }
 
-    // 4. Ensure our single default project exists
+
+    // 5. Ensure our single default project exists
     await client.query(`
         INSERT INTO project (id) VALUES ('default') ON CONFLICT (id) DO NOTHING;
     `);
@@ -79,15 +91,12 @@ async function initializeDatabase() {
 
 // --- API ENDPOINTS ---
 
-// GET /api/project - Fetch the project plan and all its points
+// GET /api/project - Fetch all project data
 app.get('/api/project', async (req, res) => {
   try {
     const client = await pool.connect();
-    // Get project plan
     const projectRes = await client.query("SELECT * FROM project WHERE id = 'default'");
     const project = projectRes.rows[0];
-
-    // Get all points for the project
     const pointsRes = await client.query("SELECT id, properties, geometry FROM points WHERE project_id = 'default'");
     client.release();
     
@@ -107,23 +116,25 @@ app.get('/api/project', async (req, res) => {
   }
 });
 
-// POST /api/project/plan - Update the project's plan using a transaction
+// POST /api/project/plan - Upload a new plan image, resets points
 app.post('/api/project/plan', async (req, res) => {
     const { planDataUrl, width, height } = req.body;
     const client = await pool.connect();
     try {
-        await client.query('BEGIN'); // Start transaction
+        await client.query('BEGIN');
+        // Reset plan image, dimensions, and corners, but keep the schema
         await client.query(
-            'UPDATE project SET plan_data_url = $1, plan_width = $2, plan_height = $3 WHERE id = $4',
+            'UPDATE project SET plan_data_url = $1, plan_width = $2, plan_height = $3, plan_corners = NULL WHERE id = $4',
             [planDataUrl, width, height, 'default']
         );
         await client.query("DELETE FROM points WHERE project_id = 'default'");
-        await client.query('COMMIT'); // Commit transaction
+        await client.query('COMMIT');
         
-        broadcast({ type: 'plan_update', payload: { project: { id: 'default', plan_data_url: planDataUrl, plan_width: width, plan_height: height }, geojsonData: { type: 'FeatureCollection', features: [] } } });
+        const updatedProject = { plan_data_url: planDataUrl, plan_width: width, plan_height: height, plan_corners: null };
+        broadcast({ type: 'plan_update', payload: { project: updatedProject, geojsonData: { type: 'FeatureCollection', features: [] } } });
         res.status(200).json({ message: 'Plan updated' });
     } catch (err) {
-        await client.query('ROLLBACK'); // Rollback on error
+        await client.query('ROLLBACK');
         console.error('Error updating plan', err.stack);
         res.status(500).send('Server Error: ' + err.message);
     } finally {
@@ -131,10 +142,48 @@ app.post('/api/project/plan', async (req, res) => {
     }
 });
 
+// POST /api/project/settings - Update project settings like schema and plan position
+app.post('/api/project/settings', async (req, res) => {
+    const { point_schema, plan_corners } = req.body;
+    
+    // Build query dynamically based on what's provided
+    let updates = [];
+    let values = [];
+    let counter = 1;
+
+    if (point_schema) {
+        updates.push(`point_schema = $${counter++}`);
+        values.push(point_schema);
+    }
+    if (plan_corners) {
+        updates.push(`plan_corners = $${counter++}`);
+        values.push(plan_corners);
+    }
+
+    if (updates.length === 0) {
+        return res.status(400).send("No settings provided to update.");
+    }
+    
+    values.push('default'); // for WHERE id = ...
+
+    const query = `UPDATE project SET ${updates.join(', ')} WHERE id = $${counter}`;
+
+    try {
+        const client = await pool.connect();
+        await client.query(query, values);
+        client.release();
+
+        broadcast({ type: 'settings_update', payload: req.body });
+        res.status(200).json({ message: "Settings updated" });
+    } catch (err) {
+        console.error('Error updating settings', err.stack);
+        res.status(500).send('Server Error: ' + err.message);
+    }
+});
+
 
 // POST /api/points - Create or update a point
 app.post('/api/points', async (req, res) => {
-  const { id, properties, geometry } = req.body.properties; // Correctly unpack feature
   const featureId = req.body.properties.id;
   const propertiesToStore = { ...req.body.properties };
   delete propertiesToStore.id;
@@ -179,15 +228,12 @@ app.post('/api/project/import', async (req, res) => {
     const { project, geojsonData } = req.body;
     const client = await pool.connect();
     try {
-        await client.query('BEGIN'); // Start transaction
-        // Update plan
+        await client.query('BEGIN');
         await client.query(
-            'UPDATE project SET plan_data_url = $1, plan_width = $2, plan_height = $3 WHERE id = $4',
-            [project.plan_data_url, project.plan_width, project.plan_height, 'default']
+            'UPDATE project SET plan_data_url = $1, plan_width = $2, plan_height = $3, point_schema = $4, plan_corners = $5 WHERE id = $6',
+            [project.plan_data_url, project.plan_width, project.plan_height, project.point_schema, project.plan_corners, 'default']
         );
-        // Clear old points
         await client.query("DELETE FROM points WHERE project_id = 'default'");
-        // Insert new points
         if (geojsonData && geojsonData.features) {
             for (const feature of geojsonData.features) {
                 const { id, ...properties } = feature.properties;
@@ -197,11 +243,11 @@ app.post('/api/project/import', async (req, res) => {
                 );
             }
         }
-        await client.query('COMMIT'); // Commit transaction
+        await client.query('COMMIT');
         broadcast({ type: 'project_import', payload: req.body });
         res.status(200).json({ message: 'Project imported successfully' });
     } catch (err) {
-        await client.query('ROLLBACK'); // Rollback on error
+        await client.query('ROLLBACK');
         console.error('Error importing project', err.stack);
         res.status(500).send('Server Error: ' + err.message);
     } finally {
