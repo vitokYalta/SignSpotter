@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+        #map {
+            height: 100%;
+            background-color: #f0f0f0;
+            cursor: default;
+        }
+        #map.add-mode-cursor {
+            cursor: crosshair !important;
+        }
+        .leaflet-marker-icon.temp-marker {
+            filter: hue-rotate(150deg) brightness(1.2);
+        }
+        .panel { display: flex; flex-direction: column; gap: 1rem; }
+        .palette-color {
+            width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+            border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        .palette-color:hover { transform: scale(1.1); }
+        .point-list-item { transition: background-color 0.2s; }
+        .group-header {
+            font-weight: bold; font-size: 0.9rem; color: #4a5568;
+            padding: 4px 8px; background-color: #e2e8f0; border-radius: 4px;
+            margin-top: 12px;
+        }
+        .selected-point {
+            stroke: #facc15 !important; stroke-width: 4 !important; stroke-opacity: 1 !important;
+        }
+        #connection-status {
+            position: fixed; top: 10px; right: 10px; z-index: 1001;
+            padding: 5px 10px; border-radius: 12px; font-size: 12px;
+            font-weight: bold; color: white; transition: background-color 0.3s;
+        }
+        #connection-status.connected { background-color: #22c55e; } /* green-500 */
+        #connection-status.disconnected { background-color: #ef4444; } /* red-500 */
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="connection-status" class="disconnected">Connecting...</div>
+    <div class="flex h-screen">
+        <!-- Left Panel: Controls -->
+        <div class="w-1/3 bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
+            <h1 class="text-xl font-bold text-gray-800 mb-4">Collaborative Map</h1>
+            
+            <div class="panel">
+                <div class="hidden"> <!-- SVG Uploader is no longer the primary way to set the map -->
+                    <label for="svgUploader" class="block text-sm font-medium text-gray-700 mb-2">1. Upload SVG Plan</label>
+                    <input type="file" id="svgUploader" accept="image/svg+xml"/>
+                </div>
+                <hr>
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800">Add & Edit Points</h2>
+                    <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                        Activate Add Mode
+                    </button>
+                </div>
+
+                <div id="pointEditor" class="hidden panel border p-3 rounded-lg bg-gray-50">
+                    <p id="editor-title" class="text-md font-semibold text-center text-blue-800 p-2 rounded-lg">Add New Point</p>
+                    <div>
+                        <label for="pointName" class="block text-sm font-medium text-gray-700">Name</label>
+                        <input type="text" id="pointName" placeholder="e.g., 'Entrance A'" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
+                    </div>
+                     <div>
+                        <label for="pointStatus" class="block text-sm font-medium text-gray-700">Status</label>
+                        <select id="pointStatus" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
+                            <option>To Do</option>
+                            <option>In Progress</option>
+                            <option>Completed</option>
+                        </select>
+                    </div>
+                     <div>
+                        <label for="pointColor" class="block text-sm font-medium text-gray-700">Color</label>
+                        <div class="flex items-center gap-2 mt-1">
+                            <input type="color" id="pointColor" value="#3388ff" class="w-16 h-10 border border-gray-300 rounded-md cursor-pointer">
+                            <button id="addToPaletteBtn" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold py-1 px-2 rounded">Add to Palette</button>
+                        </div>
+                        <div id="colorPalette" class="flex flex-wrap gap-2 mt-2"></div>
+                    </div>
+                     <div>
+                         <label for="signUploader" class="block text-sm font-medium text-gray-700">Sign Image/SVG</label>
+                         <input type="file" id="signUploader" accept="image/*,image/svg+xml" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                         <p id="copiedSignInfo" class="text-xs text-gray-500 mt-1"></p>
+                    </div>
+                    <div>
+                        <label for="pointNotes" class="block text-sm font-medium text-gray-700">Notes</label>
+                        <textarea id="pointNotes" rows="3" placeholder="Additional info..." class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm"></textarea>
+                    </div>
+                    <button id="savePointBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>
+                        Save Point
+                    </button>
+                    <button id="cancelEditBtn" class="hidden w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                        Cancel Edit
+                    </button>
+                </div>
+            </div>
+            
+            <hr class="my-4">
+
+            <div class="flex-grow flex flex-col min-h-0">
+                 <h2 class="text-lg font-semibold text-gray-800 mb-2">Point List</h2>
+                 <div class="flex gap-2 mb-2">
+                    <div class="flex-1">
+                        <label for="filterStatus" class="block text-xs font-medium text-gray-600">Filter by Status</label>
+                        <select id="filterStatus" class="mt-1 block w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md shadow-sm">
+                            <option>All</option>
+                            <option>To Do</option>
+                            <option>In Progress</option>
+                            <option>Completed</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="pointList" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2">
+                    <p class="text-center text-gray-500">Loading points...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center: Map -->
+        <div id="map-container" class="w-2/3 flex items-center justify-center bg-gray-200">
+            <div id="map" class="w-full h-full"></div>
+            <div id="map-placeholder" class="text-gray-500">Loading map...</div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // --- GLOBAL STATE ---
+        let map;
+        let geojsonLayer;
+        let tempMarker = null;
+        let addMode = false;
+        let editMode = false;
+        let editingFeatureId = null;
+        let colorPalette = [];
+        let selectedPointIds = new Set();
+        let copiedSignDataUrl = null;
+        let geojsonData = { type: "FeatureCollection", features: [] };
+
+        // --- UI ELEMENTS ---
+        const addPointBtn = document.getElementById('addPointBtn');
+        const pointEditor = document.getElementById('pointEditor');
+        const editorTitle = document.getElementById('editor-title');
+        const pointNameInput = document.getElementById('pointName');
+        const pointStatusInput = document.getElementById('pointStatus');
+        const pointColorInput = document.getElementById('pointColor');
+        const addToPaletteBtn = document.getElementById('addToPaletteBtn');
+        const colorPaletteContainer = document.getElementById('colorPalette');
+        const signUploader = document.getElementById('signUploader');
+        const copiedSignInfo = document.getElementById('copiedSignInfo');
+        const pointNotesInput = document.getElementById('pointNotes');
+        const savePointBtn = document.getElementById('savePointBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        const mapElement = document.getElementById('map');
+        const mapPlaceholder = document.getElementById('map-placeholder');
+        const pointListContainer = document.getElementById('pointList');
+        const filterStatusSelect = document.getElementById('filterStatus');
+        const connectionStatusEl = document.getElementById('connection-status');
+        
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            initMap();
+            await loadPoints();
+            setupWebSocket();
+            setupEventListeners();
+        });
+
+        function initMap() {
+            mapPlaceholder.style.display = 'none';
+            mapElement.style.display = 'block';
+            
+            // For this example, we'll use a standard map.
+            // You can replace this with your SVG overlay logic if needed.
+            map = L.map('map').setView([51.505, -0.09], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            geojsonLayer = L.geoJSON(undefined, {
+                pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+                    radius: 8, fillColor: feature.properties.color || "#3388ff",
+                    color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
+                }),
+                onEachFeature: (feature, layer) => {
+                    layer.on('click', () => populateEditor(feature.properties.id));
+                    bindPopup(layer);
+                }
+            }).addTo(map);
+
+            map.on('click', onMapClick);
+        }
+
+        function bindPopup(layer) {
+             const feature = layer.feature;
+             let popupContent = `<b>${feature.properties.name || 'Untitled'}</b>`;
+             if(feature.properties.signImage) popupContent += `<br><img src="${feature.properties.signImage}" alt="Sign" style="max-width:150px; margin-top:5px;">`;
+             if(feature.properties.status) popupContent += `<br><b>Status:</b> ${feature.properties.status}`;
+             if(feature.properties.notes) popupContent += `<br><b>Notes:</b> ${feature.properties.notes.replace(/\n/g, '<br>')}`;
+             layer.bindPopup(popupContent);
+        }
+
+        // --- DATA HANDLING ---
+        async function loadPoints() {
+            try {
+                const response = await fetch('/api/points');
+                if (!response.ok) throw new Error('Failed to fetch points');
+                const data = await response.json();
+                geojsonData = data;
+                updateAll();
+            } catch (error) {
+                console.error('Error loading points:', error);
+                pointListContainer.innerHTML = '<p class="text-center text-red-500">Could not load points.</p>';
+            }
+        }
+
+        async function savePoint(feature) {
+             try {
+                const response = await fetch('/api/points', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(feature)
+                });
+                if (!response.ok) throw new Error('Failed to save point');
+                console.log('Point saved successfully');
+            } catch (error) {
+                console.error('Error saving point:', error);
+            }
+        }
+        
+        async function deletePoint(id) {
+            try {
+                const response = await fetch(`/api/points/${id}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('Failed to delete point');
+                console.log('Point deleted successfully');
+            } catch (error) {
+                console.error('Error deleting point:', error);
+            }
+        }
+
+        // --- REAL-TIME WEBSOCKET ---
+        function setupWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                connectionStatusEl.textContent = 'Connected';
+                connectionStatusEl.className = 'connected';
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log('Received WebSocket message:', message);
+
+                if (message.type === 'update') {
+                    const updatedFeature = message.payload;
+                    const index = geojsonData.features.findIndex(f => f.properties.id === updatedFeature.properties.id);
+                    if (index > -1) {
+                        geojsonData.features[index] = updatedFeature;
+                    } else {
+                        geojsonData.features.push(updatedFeature);
+                    }
+                } else if (message.type === 'delete') {
+                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
+                }
+                updateAll();
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected. Reconnecting...');
+                connectionStatusEl.textContent = 'Disconnected';
+                connectionStatusEl.className = 'disconnected';
+                // Simple reconnect logic
+                setTimeout(setupWebSocket, 3000);
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+                ws.close();
+            };
+        }
+        
+        // --- UI LOGIC ---
+        function onMapClick(e) {
+            if (!addMode) return;
+            if (e.originalEvent.target.classList.contains('leaflet-interactive')) return;
+            if (tempMarker) map.removeLayer(tempMarker);
+            tempMarker = L.marker(e.latlng, { icon: new L.Icon.Default({ className: 'leaflet-marker-icon temp-marker' }) }).addTo(map);
+            savePointBtn.disabled = false;
+        }
+
+        function resetAddPointMode() {
+            addMode = false;
+            addPointBtn.textContent = 'Activate Add Mode';
+            addPointBtn.classList.replace('bg-red-500', 'bg-blue-500');
+            mapElement.classList.remove('add-mode-cursor');
+            resetEditor();
+        }
+
+        savePointBtn.addEventListener('click', async () => {
+            if ((!tempMarker && !editMode) || !pointNameInput.value) {
+                alert('Please place a point on the map and enter its name.');
+                return;
+            }
+
+            const uploadedSignImage = await getFileDataUrl(signUploader.files[0]);
+            const signImage = uploadedSignImage || (copiedSignDataUrl || null);
+
+            const properties = {
+                name: pointNameInput.value,
+                status: pointStatusInput.value,
+                color: pointColorInput.value,
+                notes: pointNotesInput.value,
+                signImage: signImage,
+                id: editMode ? editingFeatureId : `feature-${Date.now()}-${Math.random()}`
+            };
+
+            let geometry;
+            if (editMode) {
+                const existingFeature = geojsonData.features.find(f => f.properties.id === editingFeatureId);
+                geometry = existingFeature.geometry;
+            } else {
+                geometry = {
+                    type: "Point",
+                    coordinates: [tempMarker.getLatLng().lng, tempMarker.getLatLng().lat]
+                };
+            }
+            
+            const newFeature = { type: "Feature", properties, geometry };
+            
+            await savePoint(newFeature);
+            resetAddPointMode();
+        });
+
+
+        function populateEditor(featureId) {
+            const feature = geojsonData.features.find(f => f.properties.id === featureId);
+            if (!feature) return;
+
+            resetAddPointMode();
+            editMode = true;
+            editingFeatureId = featureId;
+
+            pointNameInput.value = feature.properties.name || '';
+            pointStatusInput.value = feature.properties.status || 'To Do';
+            pointColorInput.value = feature.properties.color || '#3388ff';
+            pointNotesInput.value = feature.properties.notes || '';
+            signUploader.value = '';
+            copiedSignInfo.textContent = '';
+
+            savePointBtn.textContent = 'Update Point';
+            savePointBtn.disabled = false;
+            editorTitle.textContent = `Editing: ${feature.properties.name}`;
+            pointEditor.classList.remove('hidden');
+            cancelEditBtn.classList.remove('hidden');
+        }
+
+        function resetEditor() {
+            pointEditor.classList.add('hidden');
+            cancelEditBtn.classList.add('hidden');
+            if (tempMarker) map.removeLayer(tempMarker);
+            tempMarker = null;
+            
+            pointNameInput.value = '';
+            pointStatusInput.value = 'To Do';
+            pointColorInput.value = '#3388ff';
+            pointNotesInput.value = '';
+            signUploader.value = '';
+            copiedSignInfo.textContent = '';
+            
+            savePointBtn.textContent = 'Save Point';
+            savePointBtn.disabled = true;
+            editMode = false;
+            editingFeatureId = null;
+            copiedSignDataUrl = null;
+        }
+
+        function renderPointList() {
+            const filterValue = filterStatusSelect.value;
+            let features = (filterValue === 'All') ? 
+                [...geojsonData.features] : 
+                geojsonData.features.filter(f => f.properties.status === filterValue);
+
+            pointListContainer.innerHTML = '';
+            if (features.length === 0) {
+                pointListContainer.innerHTML = '<p class="text-center text-gray-500">No matching points.</p>';
+                return;
+            }
+            features.forEach(feature => pointListContainer.appendChild(createPointListItem(feature)));
+        }
+
+        function createPointListItem(feature) {
+            const item = document.createElement('div');
+            item.className = 'point-list-item flex justify-between items-center px-2 py-1 rounded-lg hover:bg-gray-200 cursor-pointer';
+            item.innerHTML = `
+                <div class="flex items-center gap-2 flex-grow min-w-0">
+                    <div class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${feature.properties.color};"></div>
+                    <div class="flex-grow truncate">
+                        <span class="font-medium text-sm text-gray-800 truncate block">${feature.properties.name}</span>
+                        <p class="text-xs text-gray-500">${feature.properties.status}</p>
+                    </div>
+                </div>
+                <div class="flex-shrink-0 ml-2 flex items-center">
+                    <button class="edit-btn p-1 rounded-full hover:bg-blue-200 text-blue-700" title="Edit Point" data-id="${feature.properties.id}">
+                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
+                    </button>
+                    <button class="delete-btn p-1 rounded-full hover:bg-red-200 text-red-700" title="Delete Point" data-id="${feature.properties.id}">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                </div>
+            `;
+            item.querySelector('.edit-btn').addEventListener('click', (e) => {
+                 e.stopPropagation(); populateEditor(e.target.closest('button').dataset.id);
+            });
+            item.querySelector('.delete-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = e.target.closest('button').dataset.id;
+                if(confirm('Are you sure you want to delete this point?')) {
+                   deletePoint(id);
+                }
+            });
+            item.addEventListener('click', () => {
+                const layer = geojsonLayer.getLayers().find(l => l.feature.properties.id === feature.properties.id);
+                if(layer) { map.flyTo(layer.getLatLng(), map.getZoom() > 15 ? map.getZoom() : 15); layer.openPopup(); }
+            });
+            return item;
+        }
+
+        function updateAll() {
+            geojsonLayer.clearLayers();
+            geojsonLayer.addData(geojsonData);
+            geojsonLayer.eachLayer(bindPopup);
+            renderPointList();
+        }
+
+        function setupEventListeners() {
+             addPointBtn.addEventListener('click', () => {
+                if(editMode) resetEditor();
+                addMode = !addMode;
+                if (addMode) {
+                    addPointBtn.textContent = 'Cancel Adding';
+                    addPointBtn.classList.replace('bg-blue-500', 'bg-red-500');
+                    mapElement.classList.add('add-mode-cursor');
+                    pointEditor.classList.add('hidden'); // Hide editor until point is placed
+                } else {
+                    resetAddPointMode();
+                }
+            });
+            filterStatusSelect.addEventListener('change', renderPointList);
+            cancelEditBtn.addEventListener('click', resetEditor);
+        }
+        
+         function getFileDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                if (!file) return resolve(null);
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+    </script>
+</body>
+</html>
