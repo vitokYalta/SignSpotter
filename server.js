@@ -13,8 +13,8 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-// Increase payload limit for base64 plan data
 app.use(express.json({ limit: '50mb' }));
+// Serve static files like CSS or client-side JS from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- DATABASE INITIALIZATION ---
@@ -69,6 +69,16 @@ async function initializeDatabase() {
 
 initializeDatabase().catch(e => console.error(e.stack));
 
+// --- PAGE ROUTING ---
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'hub.html'));
+});
+
+app.get('/editor', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'editor.html'));
+});
+
+
 // --- WEBSOCKET BROADCASTING ---
 function broadcast(data) {
     wss.clients.forEach(client => {
@@ -78,7 +88,7 @@ function broadcast(data) {
     });
 }
 
-// --- API ENDPOINTS ---
+// --- API ENDPOINTS (No changes needed here) ---
 
 // Get the entire project state
 app.get('/api/project', async (req, res) => {
