@@ -6,23 +6,26 @@
     <title>Dynamic Map Editor</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-distortableimage/dist/leaflet.distortableimage.css"/>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- PDF.js -->
     <script src="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
-    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js`;</script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js`;
+    </script>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
         #map { height: 100%; width: 100%; background-color: #f0f0f0; }
         #map.add-mode-cursor { cursor: crosshair !important; }
         .leaflet-marker-icon.temp-marker { filter: hue-rotate(150deg) brightness(1.2); }
-        .modal-backdrop { background-color: rgba(0,0,0,0.5); }
         #connection-status { position: fixed; bottom: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; transition: background-color 0.3s; }
         #connection-status.connected { background-color: #22c55e; }
         #connection-status.disconnected { background-color: #ef4444; }
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.2rem; display: none; }
         .leaflet-distortable-image-handle { background-color: rgba(255, 255, 0, 0.8) !important; border: 2px solid #333 !important; }
+        .leaflet-control-geolocation { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2L7 22l10-5-5-10z'/%3E%3C/svg%3E"); background-size: 18px 18px; background-repeat: no-repeat; background-position: center; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -43,7 +46,7 @@
             <!-- Plan Actions -->
             <div id="planActions" class="space-y-2 hidden">
                  <button id="adjustPlanBtn" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Adjust Plan Position</button>
-                 <button id="lockPlanBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg hidden">Lock Plan Position</button>
+                 <button id="lockPlanBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg hidden">Lock Plan</button>
             </div>
             
             <hr class="my-4">
@@ -73,9 +76,11 @@
     <div id="connection-status" class="disconnected">Connecting...</div>
     
     <!-- Settings Modal -->
-    <div id="settingsModal" class="fixed inset-0 z-50 items-center justify-center hidden">
-        <div class="modal-backdrop fixed inset-0" id="modalBackdrop"></div>
-        <div class="bg-white rounded-lg shadow-xl m-4 sm:max-w-xl sm:w-full relative max-h-[90vh] flex flex-col">
+    <div id="settingsModal" class="fixed inset-0 z-[1000] flex items-center justify-center hidden">
+        <!-- Backdrop -->
+        <div id="modalBackdrop" class="fixed inset-0 bg-black bg-opacity-50"></div>
+        <!-- Modal Content -->
+        <div class="bg-white rounded-lg shadow-xl m-4 sm:max-w-xl sm:w-full relative z-10 max-h-[90vh] flex flex-col">
             <div class="p-4 border-b">
                 <h3 class="text-lg leading-6 font-medium text-gray-900">Project Settings</h3>
             </div>
@@ -91,18 +96,19 @@
         </div>
     </div>
 
-    <!-- Leaflet JS & Plugins -->
+    <!-- Leaflet JS & Plugins (Order is important) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
     <script src="https://unpkg.com/leaflet-distortableimage/dist/leaflet.distortableimage.js"></script>
     
     <script>
         // --- GLOBAL STATE ---
-        let map, geojsonLayer, planOverlay;
+        let map, geojsonLayer, planOverlay, userLocationMarker;
         let project = { id: 'default', point_schema: [] };
         let geojsonData = { type: "FeatureCollection", features: [] };
         
         // --- CONSTANTS ---
-        const API_HOST = window.location.origin;
+        const IS_PREVIEW = !window.location.host;
         const WS_HOST = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
         const VANCOUVER_COORDS = [49.2827, -123.1207];
 
@@ -131,7 +137,12 @@
         document.addEventListener('DOMContentLoaded', async () => {
             initMap();
             await loadProject();
-            setupWebSocket();
+            if (!IS_PREVIEW) {
+                setupWebSocket();
+            } else {
+                ui.connectionStatus.textContent = 'Real-time disabled';
+                ui.connectionStatus.className = 'disconnected';
+            }
             setupEventListeners();
         });
 
@@ -140,12 +151,53 @@
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap'
             }).addTo(map);
+
+            // Add Geolocation control
+            L.Control.Geolocation = L.Control.extend({
+                onAdd: function(map) {
+                    const btn = L.DomUtil.create('a', 'leaflet-control-geolocation leaflet-bar leaflet-control');
+                    btn.title = 'Show my location';
+                    btn.href = '#';
+                    btn.setAttribute('role', 'button');
+
+                    L.DomEvent.on(btn, 'click', L.DomEvent.stop).on(btn, 'click', function() {
+                        if (!("geolocation" in navigator)) {
+                            alert("Geolocation is not supported by your browser.");
+                            return;
+                        }
+                        navigator.geolocation.getCurrentPosition(position => {
+                            const latlng = [position.coords.latitude, position.coords.longitude];
+                            if (userLocationMarker) {
+                                userLocationMarker.setLatLng(latlng);
+                            } else {
+                                userLocationMarker = L.circle(latlng, {
+                                    radius: 10,
+                                    color: 'blue',
+                                    fillColor: '#3498db',
+                                    fillOpacity: 0.8
+                                }).addTo(map);
+                            }
+                            map.flyTo(latlng, 18);
+                        }, error => {
+                            alert(`Geolocation Error: ${error.message}`);
+                        });
+                    });
+
+                    return btn;
+                }
+            });
+            new L.Control.Geolocation({ position: 'topleft' }).addTo(map);
         }
         
         // --- DATA & SERVER COMMUNICATION ---
         async function loadProject() {
+            if (IS_PREVIEW) {
+                console.warn("Running in preview mode. API calls are disabled.");
+                handleProjectUpdate({ project: { id: 'preview', point_schema: [{name: 'Name', type: 'text'}, {name: 'Status', type: 'select', options:['Open', 'Closed']}] }, geojsonData: { type: "FeatureCollection", features: [] } });
+                return;
+            }
             try {
-                const response = await fetch(`${API_HOST}/api/project`);
+                const response = await fetch('/api/project');
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.json();
                 handleProjectUpdate(data);
@@ -156,8 +208,9 @@
         }
         
         async function sendSettings(settings) {
+            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
             try {
-                const response = await fetch(`${API_HOST}/api/project/settings`, {
+                const response = await fetch('/api/project/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(settings)
@@ -201,7 +254,7 @@
             
             const title = document.createElement('p');
             title.className = 'text-md font-semibold text-center text-blue-800 p-2 rounded-lg';
-            title.textContent = featureId ? `Editing Point` : 'New Point';
+            title.textContent = featureId ? 'Editing Point' : 'New Point';
             form.appendChild(title);
 
             // Generate fields from schema
@@ -281,6 +334,7 @@
         }
 
         async function savePointFromForm(form, featureId) {
+            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
             const properties = { id: featureId || `feature-${Date.now()}` };
             let geometry;
 
@@ -306,7 +360,7 @@
             
             const feature = { type: "Feature", properties, geometry };
             
-            await fetch(`${API_HOST}/api/points`, {
+            await fetch('/api/points', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(feature)
@@ -344,19 +398,62 @@
         async function handlePlanUpload(e) {
             const file = e.target.files[0];
             if (!file) return;
+
+            if (file.size > 25 * 1024 * 1024) { // Client-side size check for stability
+                alert("File is too large. Please select a file smaller than 25MB.");
+                ui.planUploader.value = '';
+                return;
+            }
+
+            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
+
+            ui.loadingOverlay.textContent = 'Processing file...';
             ui.loadingOverlay.style.display = 'flex';
+            
             try {
-                const { dataUrl, dimensions } = file.type === 'application/pdf' 
-                    ? await renderPdfToDataUrl(file)
-                    : { dataUrl: await getFileDataUrl(file), dimensions: await getImageDimensions(await getFileDataUrl(file)) };
+                let dataUrl, dimensions;
                 
-                const response = await fetch(`${API_HOST}/api/project/plan`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                console.log("Starting file processing...");
+                if (file.type === 'application/pdf') {
+                    ui.loadingOverlay.textContent = 'Rendering PDF (this may take a moment)...';
+                    const pdfData = await renderPdfToDataUrl(file);
+                    dataUrl = pdfData.dataUrl;
+                    dimensions = pdfData.dimensions;
+                } else {
+                    ui.loadingOverlay.textContent = 'Reading image...';
+                    dataUrl = await getFileDataUrl(file);
+                    dimensions = await getImageDimensions(dataUrl);
+                }
+                console.log("File processed into data URL.");
+
+                ui.loadingOverlay.textContent = 'Uploading to server...';
+                
+                const response = await fetch('/api/project/plan', {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planDataUrl: dataUrl, width: dimensions.width, height: dimensions.height })
                 });
-                if (!response.ok) throw new Error(await response.text());
+                
+                console.log("Server response status:", response.status);
+
+                if (!response.ok) {
+                    // Try to parse error message from server, otherwise use status text
+                    let errorMsg = `Server responded with status ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.message || errorMsg;
+                    } catch (parseErr) {
+                        // Ignore if response is not json
+                    }
+                    throw new Error(errorMsg);
+                }
+                
+                console.log("Upload successful. The map will update shortly via WebSocket.");
+                // The server will broadcast 'plan_update', and the client's WebSocket listener will call loadProject().
+
             } catch(err) { 
-                alert(`Error uploading plan: ${err.message}`);
+                console.error("Error during plan upload:", err);
+                alert(`An error occurred while uploading the plan:\n\n${err.message}`);
             } finally {
                 ui.loadingOverlay.style.display = 'none';
                 ui.planUploader.value = '';
@@ -399,11 +496,14 @@
                 const item = document.createElement('div');
                 item.className = 'flex items-center p-2 rounded hover:bg-gray-100 cursor-pointer';
                 const colorField = project.point_schema.find(field => field.type === 'color');
-                const color = colorField ? f.properties[colorField.name] : '#cccccc';
+                const color = colorField ? (f.properties[colorField.name] || '#cccccc') : '#cccccc';
+
+                const nameField = project.point_schema.find(field => field.name.toLowerCase() === 'name');
+                const name = nameField ? (f.properties[nameField.name] || 'Untitled Point') : 'Untitled Point';
 
                 item.innerHTML = `
                     <div class="w-4 h-4 rounded-full mr-3" style="background-color: ${color}"></div>
-                    <span>${f.properties.Name || f.properties.name || 'Untitled Point'}</span>
+                    <span>${name}</span>
                 `;
                 item.onclick = () => map.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], 18);
                 ui.pointListContainer.appendChild(item);
@@ -414,11 +514,9 @@
         function openSettingsModal() {
             renderSchemaBuilder();
             ui.settingsModal.classList.remove('hidden');
-            ui.settingsModal.classList.add('flex');
         }
         function closeSettingsModal() { 
             ui.settingsModal.classList.add('hidden');
-            ui.settingsModal.classList.remove('flex');
         }
         
         function renderSchemaBuilder() {
@@ -511,7 +609,16 @@
         // --- UTILITY FUNCTIONS ---
         function getFileDataUrl(file) { return new Promise((res, rej) => { if (!file) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
         function getImageDimensions(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res({width: i.width, height: i.height}); i.onerror = rej; i.src = src; }); }
-        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; }
+        async function renderPdfToDataUrl(file) { 
+            const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; 
+            const page = await pdf.getPage(1); 
+            const viewport = page.getViewport({ scale: 2.0 }); 
+            const canvas = document.createElement('canvas'); 
+            canvas.height = viewport.height; 
+            canvas.width = viewport.width; 
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; 
+            return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; 
+        }
     </script>
 </body>
 </html>
