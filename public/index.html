@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative Map Editor</title>
+    <title>Dynamic Map Editor</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-distortableimage/dist/leaflet.distortableimage.css"/>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- PDF.js -->
@@ -13,559 +14,493 @@
     <script>pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js`;</script>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
-        #map { height: 100%; width: 100%; background-color: #f0f0f0; cursor: default; }
+        #map { height: 100%; width: 100%; background-color: #f0f0f0; }
         #map.add-mode-cursor { cursor: crosshair !important; }
         .leaflet-marker-icon.temp-marker { filter: hue-rotate(150deg) brightness(1.2); }
-        .panel { display: flex; flex-direction: column; gap: 1rem; }
-        .palette-color { width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); transition: transform 0.1s; }
-        .palette-color:hover { transform: scale(1.1); }
-        .point-list-item { transition: background-color 0.2s; }
-        #connection-status { position: fixed; top: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; transition: background-color 0.3s; }
+        .modal-backdrop { background-color: rgba(0,0,0,0.5); }
+        #connection-status { position: fixed; bottom: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; transition: background-color 0.3s; }
         #connection-status.connected { background-color: #22c55e; }
         #connection-status.disconnected { background-color: #ef4444; }
-        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.2rem; display: none; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.2rem; display: none; }
     </style>
 </head>
 <body class="bg-gray-100">
-    <div id="loading-overlay">Uploading, please wait...</div>
-    <div id="connection-status" class="disconnected">Connecting...</div>
+    <div id="loading-overlay">Пожалуйста, подождите...</div>
     <div class="flex h-screen">
         <!-- Left Panel: Controls -->
         <div class="w-1/3 max-w-sm bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
-            <h1 class="text-xl font-bold text-gray-800 mb-4">Collaborative Map Editor</h1>
+            <h1 class="text-xl font-bold text-gray-800 mb-4">Dynamic Map Editor</h1>
             
-            <div class="panel">
-                 <div>
-                    <label for="planUploader" class="block text-sm font-medium text-gray-700 mb-2">1. Upload Plan (SVG/PDF)</label>
-                    <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                </div>
-
-                <hr>
-
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800">2. Add & Edit Points</h2>
-                    <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>
-                        Activate Add Mode
-                    </button>
-                </div>
-                
-                <div id="pointEditor" class="hidden panel border p-3 rounded-lg bg-gray-50">
-                     <p id="editor-title" class="text-md font-semibold text-center text-blue-800 p-2 rounded-lg">Add New Point</p>
-                    <div>
-                        <label for="pointName" class="block text-sm font-medium text-gray-700">Name</label>
-                        <input type="text" id="pointName" placeholder="e.g., 'Entrance A'" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
-                    </div>
-                     <div>
-                        <label for="pointStatus" class="block text-sm font-medium text-gray-700">Status</label>
-                        <select id="pointStatus" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
-                            <option>To Do</option>
-                            <option>In Progress</option>
-                            <option>Completed</option>
-                        </select>
-                    </div>
-                     <div>
-                        <label for="pointColor" class="block text-sm font-medium text-gray-700">Color</label>
-                        <div class="flex items-center gap-2 mt-1">
-                            <input type="color" id="pointColor" value="#3388ff" class="w-16 h-10 border border-gray-300 rounded-md cursor-pointer">
-                            <button id="addToPaletteBtn" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold py-1 px-2 rounded">Add to Palette</button>
-                        </div>
-                        <div id="colorPalette" class="flex flex-wrap gap-2 mt-2"></div>
-                    </div>
-                     <div>
-                         <label for="signUploader" class="block text-sm font-medium text-gray-700">Sign Image</label>
-                         <input type="file" id="signUploader" accept="image/*,image/svg+xml" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                         <p id="copiedSignInfo" class="text-xs text-gray-500 mt-1"></p>
-                    </div>
-                    <div>
-                        <label for="pointNotes" class="block text-sm font-medium text-gray-700">Notes</label>
-                        <textarea id="pointNotes" rows="3" placeholder="Additional info..." class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm"></textarea>
-                    </div>
-                    <button id="savePointBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300" disabled>Save Point</button>
-                    <button id="cancelEditBtn" class="hidden w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
-                </div>
-            </div>
-            
-            <hr class="my-4">
-            
-            <div class="flex-grow flex flex-col min-h-0">
-                 <h2 class="text-lg font-semibold text-gray-800 mb-2">3. Point List</h2>
-                 <div class="flex gap-2 mb-2">
-                    <div class="flex-1">
-                        <label for="filterStatus" class="block text-xs font-medium text-gray-600">Filter by Status</label>
-                        <select id="filterStatus" class="mt-1 block w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md shadow-sm">
-                            <option>All</option>
-                            <option>To Do</option>
-                            <option>In Progress</option>
-                            <option>Completed</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="pointList" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2">
-                    <p class="text-center text-gray-500">No points added yet.</p>
-                </div>
+            <!-- Project Actions -->
+            <div class="space-y-2">
+                <button id="settingsBtn" class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">Настройки проекта</button>
+                <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
             </div>
 
             <hr class="my-4">
-            <div class="space-y-3">
-                <h2 class="text-lg font-semibold text-gray-800">4. Data Management</h2>
-                <div class="flex gap-2">
-                    <button id="importProjectBtn" class="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg">Import</button>
-                    <button id="exportProjectBtn" class="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>Export</button>
-                    <input type="file" id="projectUploader" class="hidden" accept=".json"/>
-                </div>
-                <button id="exportViewerBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>
-                   Export Standalone Viewer
-                </button>
+
+            <!-- Plan Actions -->
+            <div id="planActions" class="space-y-2 hidden">
+                 <button id="adjustPlanBtn" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Настроить положение плана</button>
+                 <button id="lockPlanBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg hidden">Закрепить положение плана</button>
             </div>
+            
+            <hr class="my-4">
+
+            <!-- Points Section -->
+            <div>
+                <h2 class="text-lg font-semibold text-gray-800">Точки на карте</h2>
+                <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>Добавить точку</button>
+                <div id="pointEditorContainer" class="mt-4"></div>
+            </div>
+            
+            <div class="flex-grow flex flex-col min-h-0 mt-4">
+                 <div id="pointListContainer" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2">
+                    <p class="text-center text-gray-500">Нет точек для отображения.</p>
+                </div>
+            </div>
+
         </div>
 
         <!-- Center: Map -->
-        <div id="map-container" class="flex-grow flex items-center justify-center bg-gray-200">
+        <div class="flex-grow bg-gray-200">
             <div id="map"></div>
         </div>
     </div>
 
-    <!-- Leaflet JS -->
+    <!-- Connection Status -->
+    <div id="connection-status" class="disconnected">Подключение...</div>
+    
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 z-50 items-center justify-center hidden">
+        <div class="modal-backdrop fixed inset-0"></div>
+        <div class="bg-white rounded-lg shadow-xl m-4 sm:max-w-xl sm:w-full relative max-h-[90vh] flex flex-col">
+            <div class="p-4 border-b">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Настройки проекта</h3>
+            </div>
+            <div class="p-4 overflow-y-auto">
+                <h4 class="font-semibold text-gray-800 mb-2">Конструктор полей для точек</h4>
+                <div id="schemaBuilder" class="space-y-3"></div>
+                <button id="addFieldBtn" class="mt-3 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 font-bold py-1 px-3 rounded-lg">+ Добавить поле</button>
+            </div>
+            <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                 <button id="closeSettingsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Закрыть</button>
+                 <button id="saveSettingsBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Сохранить настройки</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS & Plugins -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-distortableimage/dist/leaflet.distortableimage.js"></script>
+    
     <script>
         // --- GLOBAL STATE ---
-        let map;
-        let geojsonLayer;
-        let imageOverlay;
-        let tileLayer;
-        let tempMarker = null;
-        let addMode = false;
-        let editMode = false;
-        let editingFeatureId = null;
-        let colorPalette = [];
-        let copiedSignDataUrl = null;
-        let project = { id: 'default' };
+        let map, geojsonLayer, planOverlay;
+        let project = { id: 'default', point_schema: [] };
         let geojsonData = { type: "FeatureCollection", features: [] };
         
         // --- CONSTANTS ---
-        const IS_SANDBOXED = window.location.origin === 'null' || window.location.origin === undefined;
-        const API_HOST = IS_SANDBOXED ? 'http://localhost:3000' : window.location.origin;
-        const WS_HOST = IS_SANDBOXED ? 'ws://localhost:3000' : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+        const API_HOST = window.location.origin;
+        const WS_HOST = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
         const VANCOUVER_COORDS = [49.2827, -123.1207];
 
         // --- UI ELEMENTS ---
-        const planUploader = document.getElementById('planUploader');
-        const addPointBtn = document.getElementById('addPointBtn');
-        const pointEditor = document.getElementById('pointEditor');
-        const editorTitle = document.getElementById('editor-title');
-        const pointNameInput = document.getElementById('pointName');
-        const pointStatusInput = document.getElementById('pointStatus');
-        const pointColorInput = document.getElementById('pointColor');
-        const addToPaletteBtn = document.getElementById('addToPaletteBtn');
-        const colorPaletteContainer = document.getElementById('colorPalette');
-        const signUploader = document.getElementById('signUploader');
-        const copiedSignInfo = document.getElementById('copiedSignInfo');
-        const pointNotesInput = document.getElementById('pointNotes');
-        const savePointBtn = document.getElementById('savePointBtn');
-        const cancelEditBtn = document.getElementById('cancelEditBtn');
-        const mapElement = document.getElementById('map');
-        const pointListContainer = document.getElementById('pointList');
-        const filterStatusSelect = document.getElementById('filterStatus');
-        const connectionStatusEl = document.getElementById('connection-status');
-        const importProjectBtn = document.getElementById('importProjectBtn');
-        const exportProjectBtn = document.getElementById('exportProjectBtn');
-        const projectUploader = document.getElementById('projectUploader');
-        const exportViewerBtn = document.getElementById('exportViewerBtn');
-        const loadingOverlay = document.getElementById('loading-overlay');
-
-
+        const ui = {
+            loadingOverlay: document.getElementById('loading-overlay'),
+            connectionStatus: document.getElementById('connection-status'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            planUploader: document.getElementById('planUploader'),
+            planActions: document.getElementById('planActions'),
+            adjustPlanBtn: document.getElementById('adjustPlanBtn'),
+            lockPlanBtn: document.getElementById('lockPlanBtn'),
+            addPointBtn: document.getElementById('addPointBtn'),
+            pointEditorContainer: document.getElementById('pointEditorContainer'),
+            pointListContainer: document.getElementById('pointListContainer'),
+            settingsModal: document.getElementById('settingsModal'),
+            schemaBuilder: document.getElementById('schemaBuilder'),
+            addFieldBtn: document.getElementById('addFieldBtn'),
+            closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+            saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+            map: document.getElementById('map')
+        };
+        
         // --- INITIALIZATION ---
         document.addEventListener('DOMContentLoaded', async () => {
-            initBaseMap();
+            initMap();
             await loadProject();
             setupWebSocket();
             setupEventListeners();
         });
 
-        function initBaseMap() {
-            if (map) map.remove();
+        function initMap() {
             map = L.map('map').setView(VANCOUVER_COORDS, 13);
-            tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap'
             }).addTo(map);
-        }
-
-        function initPlanMap(bounds) {
-             if (map) map.remove();
-            map = L.map('map', { crs: L.CRS.Simple, minZoom: -5 });
-            imageOverlay = L.imageOverlay(project.plan_data_url, bounds).addTo(map);
-            map.fitBounds(bounds);
-
-            geojsonLayer = L.geoJSON(undefined, {
-                pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-                    radius: 8, fillColor: feature.properties.color || "#3388ff",
-                    color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
-                }),
-                onEachFeature: (feature, layer) => {
-                    layer.on('click', () => populateEditor(feature.properties.id));
-                    bindPopup(layer);
-                }
-            }).addTo(map);
-
-            map.on('click', onMapClick);
         }
         
-        function loadMapPlan() {
-            if (project.plan_data_url) {
-                const bounds = [[0, 0], [project.plan_height, project.plan_width]];
-                initPlanMap(bounds);
-                addPointBtn.disabled = false;
-                exportProjectBtn.disabled = false;
-                exportViewerBtn.disabled = false;
-            } else {
-                initBaseMap(); // If no plan, show Vancouver
-                addPointBtn.disabled = true;
-                exportProjectBtn.disabled = true;
-                exportViewerBtn.disabled = true;
-            }
-        }
-
-        // --- DATA HANDLING ---
+        // --- DATA & SERVER COMMUNICATION ---
         async function loadProject() {
             try {
                 const response = await fetch(`${API_HOST}/api/project`);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.json();
-                project = data.project;
-                geojsonData = data.geojsonData;
-                loadMapPlan();
-                updateAll();
+                handleProjectUpdate(data);
             } catch (error) {
                 console.error('Error loading project:', error);
-                alert('Could not load project data from the server.');
+                alert('Не удалось загрузить проект с сервера.');
             }
         }
         
-        async function savePoint(feature) {
-             try {
-                const response = await fetch(`${API_HOST}/api/points`, {
+        async function sendSettings(settings) {
+            try {
+                const response = await fetch(`${API_HOST}/api/project/settings`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(feature)
+                    body: JSON.stringify(settings)
                 });
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Failed to save point. Server says: ${errorText}`);
-                }
-            } catch (error) {
-                console.error('Error saving point:', error);
-                alert(error.message);
-            }
-        }
-        
-        async function deletePoint(id) {
-            try {
-                const response = await fetch(`${API_HOST}/api/points/${id}`, { method: 'DELETE' });
-                if (!response.ok) throw new Error('Failed to delete point');
-            } catch (error) {
-                console.error('Error deleting point:', error);
+                if (!response.ok) throw new Error('Failed to save settings');
+            } catch (err) {
+                alert('Ошибка сохранения настроек: ' + err.message);
             }
         }
 
-        // --- REAL-TIME & EVENT HANDLING ---
-        function setupWebSocket() {
-            const ws = new WebSocket(WS_HOST);
-            ws.onopen = () => { connectionStatusEl.textContent = 'Connected'; connectionStatusEl.className = 'connected'; };
-            ws.onmessage = (event) => { handleWebSocketMessage(JSON.parse(event.data)); };
-            ws.onclose = () => { connectionStatusEl.textContent = 'Disconnected'; connectionStatusEl.className = 'disconnected'; setTimeout(setupWebSocket, 3000); };
-            ws.onerror = (err) => { ws.close(); };
-        }
-        
-        function handleWebSocketMessage(message) {
-            switch(message.type) {
-                case 'point_update':
-                    const updatedFeature = message.payload;
-                    const index = geojsonData.features.findIndex(f => f.properties.id === updatedFeature.properties.id);
-                    if (index > -1) geojsonData.features[index] = updatedFeature;
-                    else geojsonData.features.push(updatedFeature);
-                    break;
-                case 'point_delete':
-                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
-                    break;
-                case 'plan_update':
-                case 'project_import':
-                    project = message.payload.project;
-                    geojsonData = message.payload.geojsonData;
-                    loadMapPlan();
-                    break;
+        // --- MAP & PLAN LOGIC ---
+        function renderPlan() {
+            if (planOverlay) {
+                planOverlay.remove();
+                planOverlay = null;
             }
-            updateAll();
+            if (project.plan_data_url) {
+                const corners = project.plan_corners ? project.plan_corners.map(c => L.latLng(c.lat, c.lng)) : null;
+                planOverlay = L.distortableImageOverlay(project.plan_data_url, { corners }).addTo(map);
+                ui.planActions.classList.remove('hidden');
+                ui.addPointBtn.disabled = false;
+                if (!project.plan_corners) { // If not positioned, fit to view
+                    map.setView(VANCOUVER_COORDS, 15);
+                }
+            } else {
+                ui.planActions.classList.add('hidden');
+                ui.addPointBtn.disabled = true;
+            }
         }
-        
-        function onMapClick(e) {
-            if (!addMode) return;
-            if (e.originalEvent.target.classList.contains('leaflet-interactive')) return;
-            if (tempMarker) map.removeLayer(tempMarker);
-            tempMarker = L.marker(e.latlng, { icon: new L.Icon.Default({ className: 'leaflet-marker-icon temp-marker' }) }).addTo(map);
-            pointEditor.classList.remove('hidden');
-            savePointBtn.disabled = false;
+
+        // --- DYNAMIC FORM BUILDER ---
+        function renderPointEditor(featureId = null) {
+            let feature = null;
+            if (featureId) {
+                feature = geojsonData.features.find(f => f.properties.id === featureId);
+            }
+
+            ui.pointEditorContainer.innerHTML = ''; // Clear previous form
+            const form = document.createElement('form');
+            form.className = 'panel border p-3 rounded-lg bg-gray-50';
+            
+            const title = document.createElement('p');
+            title.className = 'text-md font-semibold text-center text-blue-800 p-2 rounded-lg';
+            title.textContent = featureId ? `Редактирование точки` : 'Новая точка';
+            form.appendChild(title);
+
+            // Generate fields from schema
+            (project.point_schema || []).forEach(field => {
+                const value = feature ? feature.properties[field.name] : '';
+                form.appendChild(createFormField(field, value));
+            });
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'submit';
+            saveBtn.className = 'w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg';
+            saveBtn.textContent = 'Сохранить';
+            form.appendChild(saveBtn);
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg';
+            cancelBtn.textContent = 'Отмена';
+            cancelBtn.onclick = () => { ui.pointEditorContainer.innerHTML = ''; };
+            form.appendChild(cancelBtn);
+
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                await savePointFromForm(form, featureId);
+            };
+
+            ui.pointEditorContainer.appendChild(form);
+        }
+
+        function createFormField(field, value) {
+            const container = document.createElement('div');
+            container.className = 'mt-3';
+            const label = document.createElement('label');
+            label.textContent = field.name;
+            label.className = 'block text-sm font-medium text-gray-700';
+            container.appendChild(label);
+            
+            let input;
+            switch(field.type) {
+                case 'select':
+                    input = document.createElement('select');
+                    (field.options || []).forEach(opt => {
+                        const option = document.createElement('option');
+                        option.value = opt;
+                        option.textContent = opt;
+                        if (opt === value) option.selected = true;
+                        input.appendChild(option);
+                    });
+                    break;
+                case 'textarea':
+                    input = document.createElement('textarea');
+                    input.rows = 3;
+                    input.value = value || '';
+                    break;
+                case 'image':
+                     input = document.createElement('input');
+                     input.type = 'file';
+                     input.accept = 'image/*';
+                     input.dataset.currentImage = value || ''; // Store current image URL
+                     if (value) {
+                         const preview = document.createElement('img');
+                         preview.src = value;
+                         preview.className = 'w-16 h-16 mt-1 object-cover rounded';
+                         container.appendChild(preview);
+                     }
+                     break;
+                default: // text, color, date etc.
+                    input = document.createElement('input');
+                    input.type = field.type;
+                    input.value = value || '';
+            }
+            input.id = `field-${field.name}`;
+            input.name = field.name;
+            input.className = 'mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm';
+            container.appendChild(input);
+            return container;
+        }
+
+        async function savePointFromForm(form, featureId) {
+            const properties = { id: featureId || `feature-${Date.now()}` };
+            let geometry;
+
+            for (const field of project.point_schema) {
+                const input = form.querySelector(`[name="${field.name}"]`);
+                if (field.type === 'image') {
+                    if (input.files && input.files[0]) {
+                        properties[field.name] = await getFileDataUrl(input.files[0]);
+                    } else {
+                        properties[field.name] = input.dataset.currentImage || null;
+                    }
+                } else {
+                    properties[field.name] = input.value;
+                }
+            }
+
+            if (featureId) {
+                geometry = geojsonData.features.find(f => f.properties.id === featureId).geometry;
+            } else {
+                const center = map.getCenter();
+                geometry = { type: 'Point', coordinates: [center.lng, center.lat] };
+            }
+            
+            const feature = { type: "Feature", properties, geometry };
+            // Await is important here
+            await fetch(`${API_HOST}/api/points`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(feature)
+            });
+            ui.pointEditorContainer.innerHTML = '';
+        }
+
+        // --- EVENT LISTENERS & HANDLERS ---
+        function setupEventListeners() {
+            ui.planUploader.addEventListener('change', handlePlanUpload);
+            ui.settingsBtn.addEventListener('click', openSettingsModal);
+            ui.closeSettingsBtn.addEventListener('click', closeSettingsModal);
+            ui.saveSettingsBtn.addEventListener('click', saveSettings);
+            ui.addFieldBtn.addEventListener('click', addSchemaField);
+            ui.adjustPlanBtn.addEventListener('click', () => {
+                planOverlay.editing.enable();
+                ui.adjustPlanBtn.classList.add('hidden');
+                ui.lockPlanBtn.classList.remove('hidden');
+            });
+            ui.lockPlanBtn.addEventListener('click', async () => {
+                planOverlay.editing.disable();
+                const corners = planOverlay.getCorners();
+                await sendSettings({ plan_corners: corners });
+                ui.adjustPlanBtn.classList.remove('hidden');
+                ui.lockPlanBtn.classList.add('hidden');
+            });
+            ui.addPointBtn.addEventListener('click', () => renderPointEditor());
         }
 
         async function handlePlanUpload(e) {
             const file = e.target.files[0];
             if (!file) return;
-            loadingOverlay.style.display = 'flex';
-            let planDataUrl, width, height;
+            ui.loadingOverlay.style.display = 'flex';
             try {
-                if (file.type === 'image/svg+xml') {
-                    planDataUrl = await getFileDataUrl(file);
-                    const image = await loadImage(planDataUrl);
-                    width = image.width; height = image.height;
-                } else if (file.type === 'application/pdf') {
-                    const { dataUrl, dimensions } = await renderPdfToDataUrl(file);
-                    planDataUrl = dataUrl;
-                    width = dimensions.width; height = dimensions.height;
-                } else {
-                    throw new Error('Unsupported file type. Please use SVG or PDF.');
-                }
+                const { dataUrl, dimensions } = file.type === 'application/pdf' 
+                    ? await renderPdfToDataUrl(file)
+                    : { dataUrl: await getFileDataUrl(file), dimensions: await getImageDimensions(await getFileDataUrl(file)) };
                 
                 const response = await fetch(`${API_HOST}/api/project/plan`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ planDataUrl, width, height })
+                    body: JSON.stringify({ planDataUrl: dataUrl, width: dimensions.width, height: dimensions.height })
                 });
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Server failed to process the plan. ${errorText}`);
-                }
+                if (!response.ok) throw new Error(await response.text());
             } catch(err) { 
-                console.error("Failed to upload plan", err); 
-                alert(`Error uploading plan: ${err.message}`);
+                alert(`Ошибка загрузки плана: ${err.message}`);
             } finally {
-                loadingOverlay.style.display = 'none';
-                planUploader.value = '';
+                ui.loadingOverlay.style.display = 'none';
+                ui.planUploader.value = '';
             }
         }
         
-        function handleProjectImport(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            loadingOverlay.style.display = 'flex';
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                try {
-                    const data = JSON.parse(event.target.result);
-                    if (!data.project || !data.geojsonData) throw new Error("Invalid project file format.");
-                    
-                    const response = await fetch(`${API_HOST}/api/project/import`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
+        function handleProjectUpdate(data) {
+             project = data.project;
+             geojsonData = data.geojsonData;
+             if (!project.point_schema) project.point_schema = []; // Ensure schema exists
+             renderPlan();
+             renderPoints();
+             renderPointList();
+        }
+
+        function renderPoints() {
+            if (geojsonLayer) geojsonLayer.remove();
+            geojsonLayer = L.geoJSON(geojsonData, {
+                 pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+                    radius: 8,
+                    fillColor: feature.properties.Color || "#3388ff",
+                    color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
+                }),
+                onEachFeature: (feature, layer) => {
+                    layer.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        renderPointEditor(feature.properties.id);
                     });
-
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`Import failed on server: ${errorText}`);
-                    }
-                } catch (err) { 
-                    alert('Error importing project: ' + err.message); 
-                } finally {
-                    loadingOverlay.style.display = 'none';
-                    projectUploader.value = '';
                 }
-            };
-            reader.readAsText(file);
+            }).addTo(map);
         }
-
-        function updateAll() {
-            if (!geojsonLayer && project.plan_data_url) {
-                // This can happen if the websocket message arrives before the plan map is initialized
-                loadMapPlan();
-            }
-            if (geojsonLayer) {
-                geojsonLayer.clearLayers();
-                geojsonLayer.addData(geojsonData);
-                geojsonLayer.eachLayer(bindPopup);
-            }
-            renderPointList();
-        }
-
-        // --- All other UI and helper functions from previous version ---
-        function setupEventListeners() {
-             addPointBtn.addEventListener('click', () => {
-                if(editMode) resetEditor();
-                addMode = !addMode;
-                if (addMode) {
-                    addPointBtn.textContent = 'Cancel Adding';
-                    addPointBtn.classList.replace('bg-blue-500', 'bg-red-500');
-                    mapElement.classList.add('add-mode-cursor');
-                    pointEditor.classList.add('hidden'); // Hide editor until a point is clicked
-                } else {
-                    resetAddPointMode();
-                }
-            });
-            filterStatusSelect.addEventListener('change', renderPointList);
-            cancelEditBtn.addEventListener('click', resetEditor);
-            planUploader.addEventListener('change', handlePlanUpload);
-            importProjectBtn.addEventListener('click', () => projectUploader.click());
-            projectUploader.addEventListener('change', handleProjectImport);
-            exportProjectBtn.addEventListener('click', handleProjectExport);
-            exportViewerBtn.addEventListener('click', handleViewerExport);
-            addToPaletteBtn.addEventListener('click', () => {
-                const color = pointColorInput.value;
-                if (!colorPalette.includes(color)) { colorPalette.push(color); renderColorPalette(); }
-            });
-        }
-
-        function renderColorPalette() {
-            colorPaletteContainer.innerHTML = '';
-            colorPalette.forEach(color => {
-                const swatch = document.createElement('div');
-                swatch.className = 'palette-color';
-                swatch.style.backgroundColor = color;
-                swatch.title = color;
-                swatch.addEventListener('click', () => { pointColorInput.value = color; });
-                colorPaletteContainer.appendChild(swatch);
-            });
-        }
-
-        function resetAddPointMode() {
-            addMode = false;
-            addPointBtn.textContent = 'Activate Add Mode';
-            addPointBtn.classList.replace('bg-red-500', 'bg-blue-500');
-            mapElement.classList.remove('add-mode-cursor');
-            resetEditor();
-        }
-
-        savePointBtn.addEventListener('click', async () => {
-            if ((!tempMarker && !editMode) || !pointNameInput.value) {
-                alert('Please place a point on the map and enter its name.');
-                return;
-            }
-            const uploadedSignImage = await getFileDataUrl(signUploader.files[0]);
-            const signImage = uploadedSignImage || (copiedSignDataUrl || null);
-            
-            const properties = {
-                name: pointNameInput.value, status: pointStatusInput.value,
-                color: pointColorInput.value, notes: pointNotesInput.value,
-                signImage: signImage,
-                id: editMode ? editingFeatureId : `feature-${Date.now()}-${Math.random()}`
-            };
-
-            let geometry;
-            let existingFeature;
-
-            if (editMode) {
-                existingFeature = geojsonData.features.find(f => f.properties.id === editingFeatureId);
-                if (existingFeature) {
-                    geometry = existingFeature.geometry;
-                    // Preserve original sign image if no new one is uploaded
-                    if (!properties.signImage && existingFeature.properties.signImage) {
-                        properties.signImage = existingFeature.properties.signImage;
-                    }
-                } else { 
-                    alert("Error: Cannot find feature to edit."); 
-                    return; 
-                }
-            } else {
-                geometry = { type: "Point", coordinates: [tempMarker.getLatLng().lng, tempMarker.getLatLng().lat] };
-            }
-
-            const newFeature = { type: "Feature", properties, geometry };
-            await savePoint(newFeature);
-            resetAddPointMode();
-        });
         
-        function populateEditor(featureId) {
-            const feature = geojsonData.features.find(f => f.properties.id === featureId);
-            if (!feature) return;
-            resetAddPointMode();
-            editMode = true; editingFeatureId = featureId;
-            pointNameInput.value = feature.properties.name || '';
-            pointStatusInput.value = feature.properties.status || 'To Do';
-            pointColorInput.value = feature.properties.color || '#3388ff';
-            pointNotesInput.value = feature.properties.notes || '';
-            signUploader.value = ''; copiedSignInfo.textContent = '';
-            savePointBtn.textContent = 'Update Point';
-            savePointBtn.disabled = false;
-            editorTitle.textContent = `Editing: ${feature.properties.name}`;
-            pointEditor.classList.remove('hidden');
-            cancelEditBtn.classList.remove('hidden');
-        }
-
-        function resetEditor() {
-            pointEditor.classList.add('hidden');
-            cancelEditBtn.classList.add('hidden');
-            if (tempMarker) map.removeLayer(tempMarker);
-            tempMarker = null;
-            pointNameInput.value = ''; pointStatusInput.value = 'To Do';
-            pointColorInput.value = '#3388ff'; pointNotesInput.value = '';
-            signUploader.value = ''; copiedSignInfo.textContent = '';
-            savePointBtn.textContent = 'Save Point';
-            savePointBtn.disabled = true;
-            editMode = false; editingFeatureId = null; copiedSignDataUrl = null;
-        }
-
         function renderPointList() {
-            const filterValue = filterStatusSelect.value;
-            let features = (filterValue === 'All') ? [...geojsonData.features] : geojsonData.features.filter(f => f.properties.status === filterValue);
-            pointListContainer.innerHTML = '';
-            if (features.length === 0) {
-                pointListContainer.innerHTML = '<p class="text-center text-gray-500">No matching points.</p>';
+            ui.pointListContainer.innerHTML = '';
+            if (geojsonData.features.length === 0) {
+                ui.pointListContainer.innerHTML = '<p class="text-center text-gray-500">Нет точек для отображения.</p>';
                 return;
             }
-            features.forEach(feature => pointListContainer.appendChild(createPointListItem(feature)));
-        }
+            geojsonData.features.forEach(f => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center p-2 rounded hover:bg-gray-100 cursor-pointer';
+                const colorField = project.point_schema.find(field => field.type === 'color');
+                const color = colorField ? f.properties[colorField.name] : '#cccccc';
 
-        function createPointListItem(feature) {
-            const item = document.createElement('div');
-            item.className = 'point-list-item flex justify-between items-center px-2 py-1 rounded-lg hover:bg-gray-200 cursor-pointer';
-            item.innerHTML = `<div class="flex items-center gap-2 flex-grow min-w-0"><div class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${feature.properties.color};"></div><div class="flex-grow truncate"><span class="font-medium text-sm text-gray-800 truncate block">${feature.properties.name}</span><p class="text-xs text-gray-500">${feature.properties.status}</p></div></div><div class="flex-shrink-0 ml-2 flex items-center"><button class="edit-btn p-1 rounded-full hover:bg-blue-200 text-blue-700" title="Edit" data-id="${feature.properties.id}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button><button class="delete-btn p-1 rounded-full hover:bg-red-200 text-red-700" title="Delete" data-id="${feature.properties.id}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div>`;
-            item.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); populateEditor(e.target.closest('button').dataset.id); });
-            item.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); const id = e.target.closest('button').dataset.id; if(confirm('Delete this point?')) { deletePoint(id); }});
-            item.addEventListener('click', () => {
-                if (!geojsonLayer) return;
-                const layer = geojsonLayer.getLayers().find(l => l.feature.properties.id === feature.properties.id);
-                if(layer) { map.flyTo(layer.getLatLng(), map.getZoom() > 1 ? map.getZoom() : 2); layer.openPopup(); }
+                item.innerHTML = `
+                    <div class="w-4 h-4 rounded-full mr-3" style="background-color: ${color}"></div>
+                    <span>${f.properties.Name || f.properties.name || 'Без названия'}</span>
+                `;
+                item.onclick = () => map.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], 18);
+                ui.pointListContainer.appendChild(item);
             });
-            return item;
+        }
+        
+        // --- SETTINGS MODAL ---
+        function openSettingsModal() {
+            renderSchemaBuilder();
+            ui.settingsModal.style.display = 'flex';
+        }
+        function closeSettingsModal() { ui.settingsModal.style.display = 'none'; }
+        
+        function renderSchemaBuilder() {
+            ui.schemaBuilder.innerHTML = '';
+            (project.point_schema || []).forEach((field, index) => {
+                ui.schemaBuilder.appendChild(createSchemaFieldRow(field, index));
+            });
         }
 
-        function handleProjectExport() {
-            const data = { project, geojsonData };
-            downloadFile(JSON.stringify(data, null, 2), "map_project.json", "text/json");
+        function createSchemaFieldRow(field, index) {
+            const div = document.createElement('div');
+            div.className = 'grid grid-cols-3 gap-2 items-center p-2 border rounded';
+            div.innerHTML = `
+                <input type="text" value="${field.name}" placeholder="Название поля" class="col-span-1 p-1 border rounded schema-name">
+                <select class="col-span-1 p-1 border rounded schema-type">
+                    <option value="text" ${field.type === 'text' ? 'selected' : ''}>Текст</option>
+                    <option value="textarea" ${field.type === 'textarea' ? 'selected' : ''}>Длинный текст</option>
+                    <option value="select" ${field.type === 'select' ? 'selected' : ''}>Выпадающий список</option>
+                    <option value="color" ${field.type === 'color' ? 'selected' : ''}>Цвет</option>
+                    <option value="date" ${field.type === 'date' ? 'selected' : ''}>Дата</option>
+                    <option value="image" ${field.type === 'image' ? 'selected' : ''}>Изображение</option>
+                </select>
+                <div class="flex items-center">
+                    <input type="text" value="${(field.options || []).join(',')}" placeholder="Опции (через запятую)" class="flex-grow p-1 border rounded schema-options ${field.type !== 'select' ? 'hidden' : ''}">
+                    <button data-index="${index}" class="ml-2 text-red-500 hover:text-red-700 remove-field-btn">&times;</button>
+                </div>
+            `;
+            div.querySelector('.schema-type').onchange = (e) => {
+                div.querySelector('.schema-options').classList.toggle('hidden', e.target.value !== 'select');
+            };
+            div.querySelector('.remove-field-btn').onclick = (e) => {
+                project.point_schema.splice(e.target.dataset.index, 1);
+                renderSchemaBuilder();
+            };
+            return div;
         }
 
-        function handleViewerExport() {
-            if (!project.plan_data_url) {
-                alert("Please upload a plan before exporting a viewer.");
-                return;
+        function addSchemaField() {
+            if (!project.point_schema) project.point_schema = [];
+            project.point_schema.push({ name: '', type: 'text', options: [] });
+            renderSchemaBuilder();
+        }
+
+        async function saveSettings() {
+            const newSchema = [];
+            document.querySelectorAll('#schemaBuilder > div').forEach(row => {
+                const name = row.querySelector('.schema-name').value.trim();
+                const type = row.querySelector('.schema-type').value;
+                const options = row.querySelector('.schema-options').value.split(',').map(s => s.trim()).filter(Boolean);
+                if (name) {
+                    newSchema.push({ name, type, options });
+                }
+            });
+            await sendSettings({ point_schema: newSchema });
+            project.point_schema = newSchema;
+            closeSettingsModal();
+        }
+        
+        // --- WEBSOCKET HANDLING ---
+        function setupWebSocket() {
+            const ws = new WebSocket(WS_HOST);
+            ws.onopen = () => { ui.connectionStatus.textContent = 'Подключено'; ui.connectionStatus.className = 'connected'; };
+            ws.onmessage = (event) => handleWebSocketMessage(JSON.parse(event.data));
+            ws.onclose = () => { ui.connectionStatus.textContent = 'Отключено'; ui.connectionStatus.className = 'disconnected'; setTimeout(setupWebSocket, 3000); };
+            ws.onerror = () => ws.close();
+        }
+        
+        function handleWebSocketMessage(message) {
+            switch(message.type) {
+                case 'point_update':
+                    const index = geojsonData.features.findIndex(f => f.properties.id === message.payload.properties.id);
+                    if (index > -1) geojsonData.features[index] = message.payload;
+                    else geojsonData.features.push(message.payload);
+                    renderPoints();
+                    renderPointList();
+                    break;
+                case 'point_delete':
+                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
+                    renderPoints();
+                    renderPointList();
+                    break;
+                case 'plan_update':
+                case 'project_import':
+                case 'settings_update':
+                     loadProject(); // Simplest way to get all changes
+                    break;
             }
-            const viewerHTML = createViewerHTML(project, geojsonData);
-            downloadFile(viewerHTML, `map_viewer_${Date.now()}.html`, "text/html");
         }
 
-        function bindPopup(layer) {
-             const f = layer.feature;
-             let c = `<b>${f.properties.name||'Untitled'}</b><br><b>Status:</b> ${f.properties.status}`;
-             if(f.properties.signImage) c += `<br><img src="${f.properties.signImage}" alt="Sign" style="max-width:150px;margin-top:5px;">`;
-             if(f.properties.notes) c += `<br><b>Notes:</b> ${f.properties.notes.replace(/\n/g, '<br>')}`;
-             layer.bindPopup(c);
-        }
-        
+        // --- UTILITY FUNCTIONS ---
         function getFileDataUrl(file) { return new Promise((res, rej) => { if (!file) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
-        function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
-        function downloadFile(content, fileName, contentType) { const a = document.createElement("a"); const file = new Blob([content], { type: contentType }); a.href = URL.createObjectURL(file); a.download = fileName; a.click(); URL.revokeObjectURL(a.href); }
-        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: context, viewport: viewport }).promise; return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; }
-        
-        function createViewerHTML(projectData, geojson) {
-            return `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><title>Map Viewer</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><style>html,body{height:100%;margin:0;padding:0;overflow:hidden;font-family:sans-serif}#map{height:100%;width:100%;background-color:#f0f0f0}.leaflet-popup-content-wrapper{border-radius:8px}.leaflet-popup-content{margin:12px;font-size:14px}.popup-img{max-width:200px;max-height:200px;margin-top:8px;border-radius:4px}.popup-status-select{width:100%;padding:8px;margin-top:8px;border:1px solid #ccc;border-radius:4px}#toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background-color:rgba(0,0,0,0.7);color:white;padding:10px 20px;border-radius:20px;z-index:10000;opacity:0;transition:opacity .5s;font-size:14px;pointer-events:none}#toast.show{opacity:1}</style></head><body><div id="map"></div><div id="toast"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script><script>
-const initialProject = ${JSON.stringify(projectData)}; const initialGeojsonData = ${JSON.stringify(geojson)}; const storageKey = 'map-viewer-storage-' + initialProject.id; let map, geojsonLayer, currentGeojsonData, toastTimeout; const toast = document.getElementById('toast');
-const STATUS_COLORS = { 'To Do': '#3388ff', 'In Progress': '#f59e0b', 'Completed': '#22c55e' };
-document.addEventListener('DOMContentLoaded', () => { loadData(); initMap(); });
-function loadData(){ try { const d = localStorage.getItem(storageKey); currentGeojsonData = d ? JSON.parse(d) : JSON.parse(JSON.stringify(initialGeojsonData)); if(d) showToast('Loaded saved progress'); } catch(e){ currentGeojsonData = JSON.parse(JSON.stringify(initialGeojsonData)); } }
-function saveData(){ try { localStorage.setItem(storageKey, JSON.stringify(currentGeojsonData)); showToast('Progress Saved!', 1500); } catch(e){ showToast('Error saving data.', 2000); } }
-function initMap(){ map = L.map('map', { crs: L.CRS.Simple, minZoom: -5, zoomControl: true }); const bounds = [[0, 0], [initialProject.plan_height, initialProject.plan_width]]; L.imageOverlay(initialProject.plan_data_url, bounds).addTo(map); map.fitBounds(bounds); renderGeoJson(); }
-function renderGeoJson(){ if (geojsonLayer) geojsonLayer.remove(); geojsonLayer = L.geoJSON(currentGeojsonData, { pointToLayer: (f, l) => L.circleMarker(l, { radius: 8, fillColor: STATUS_COLORS[f.properties.status] || f.properties.color, color: "#000", weight: 1, opacity: 1, fillOpacity: 0.9 }), onEachFeature: (f, l) => { l.on('click', () => { l.bindPopup(createPopupContent(f.properties), { minWidth: 220 }).openPopup(); const s = document.getElementById('popup-status-' + f.properties.id); if(s) s.addEventListener('change', (e) => updatePointStatus(f.properties.id, e.target.value, l)); }); } }).addTo(map); }
-function createPopupContent(p){ const o = Object.keys(STATUS_COLORS).map(opt => \`<option value="\${opt}" \${p.status === opt ? 'selected' : ''}>\${opt}</option>\`).join(''); return \`<div style="display:flex;flex-direction:column;gap:8px;"><p style="font-weight:bold;font-size:16px;">\${p.name||'Untitled'}</p>\${p.signImage ? \`<img src="\${p.signImage}" alt="Sign" class="popup-img">\` : ''}<div><label style="font-weight:600;display:block;">Status:</label><select id="popup-status-\${p.id}" class="popup-status-select">\${o}</select></div>\${p.notes ? \`<p><b>Notes:</b> \${p.notes.replace(/\\n/g, '<br>')}</p>\` : ''}</div>\`; }
-function updatePointStatus(id, newStatus, layer){ const f = currentGeojsonData.features.find(ft => ft.properties.id === id); if (f) { f.properties.status = newStatus; layer.setStyle({ fillColor: STATUS_COLORS[newStatus] }); saveData(); layer.closePopup(); } }
-function showToast(msg, dur = 3000){ clearTimeout(toastTimeout); toast.textContent = msg; toast.classList.add('show'); toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, dur); }
-<\/script></body></html>`;
-        }
+        function getImageDimensions(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res({width: i.width, height: i.height}); i.onerror = rej; i.src = src; }); }
+        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; }
     </script>
 </body>
 </html>
