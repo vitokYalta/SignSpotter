@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Map Editor - Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="flex flex-col items-center justify-center h-full">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">Dynamic Map Editor</h1>
+        <div class="space-y-4">
+            <button id="create-project-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg">Create New Project</button>
+            <button id="load-project-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-lg">Load Existing Project</button>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('create-project-btn').addEventListener('click', () => {
+            // Redirect to the editor page with a flag to start a new project
+            window.location.href = '/editor?new=true';
+        });
+
+        document.getElementById('load-project-btn').addEventListener('click', () => {
+            // Redirect to the editor to load the existing project
+            window.location.href = '/editor';
+        });
+    </script>
+</body>
+</html>
