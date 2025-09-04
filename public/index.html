@@ -3,77 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative Map</title>
+    <title>Collaborative Map Editor</title>
     <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js -->
+    <script src="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js`;</script>
     <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            font-family: 'Inter', sans-serif;
-        }
-        #map {
-            height: 100%;
-            background-color: #f0f0f0;
-            cursor: default;
-        }
-        #map.add-mode-cursor {
-            cursor: crosshair !important;
-        }
-        .leaflet-marker-icon.temp-marker {
-            filter: hue-rotate(150deg) brightness(1.2);
-        }
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+        #map { height: 100%; background-color: #f0f0f0; cursor: default; }
+        #map.add-mode-cursor { cursor: crosshair !important; }
+        .leaflet-marker-icon.temp-marker { filter: hue-rotate(150deg) brightness(1.2); }
         .panel { display: flex; flex-direction: column; gap: 1rem; }
-        .palette-color {
-            width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
-            border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.2);
-            transition: transform 0.1s;
-        }
+        .palette-color { width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); transition: transform 0.1s; }
         .palette-color:hover { transform: scale(1.1); }
         .point-list-item { transition: background-color 0.2s; }
-        .group-header {
-            font-weight: bold; font-size: 0.9rem; color: #4a5568;
-            padding: 4px 8px; background-color: #e2e8f0; border-radius: 4px;
-            margin-top: 12px;
-        }
-        .selected-point {
-            stroke: #facc15 !important; stroke-width: 4 !important; stroke-opacity: 1 !important;
-        }
-        #connection-status {
-            position: fixed; top: 10px; right: 10px; z-index: 1001;
-            padding: 5px 10px; border-radius: 12px; font-size: 12px;
-            font-weight: bold; color: white; transition: background-color 0.3s;
-        }
-        #connection-status.connected { background-color: #22c55e; } /* green-500 */
-        #connection-status.disconnected { background-color: #ef4444; } /* red-500 */
+        .group-header { font-weight: bold; font-size: 0.9rem; color: #4a5568; padding: 4px 8px; background-color: #e2e8f0; border-radius: 4px; margin-top: 12px; }
+        .selected-point { stroke: #facc15 !important; stroke-width: 4 !important; stroke-opacity: 1 !important; }
+        #connection-status { position: fixed; top: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; transition: background-color 0.3s; }
+        #connection-status.connected { background-color: #22c55e; }
+        #connection-status.disconnected { background-color: #ef4444; }
     </style>
 </head>
 <body class="bg-gray-100">
     <div id="connection-status" class="disconnected">Connecting...</div>
     <div class="flex h-screen">
         <!-- Left Panel: Controls -->
-        <div class="w-1/3 bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
-            <h1 class="text-xl font-bold text-gray-800 mb-4">Collaborative Map</h1>
+        <div class="w-1/3 max-w-sm bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
+            <h1 class="text-xl font-bold text-gray-800 mb-4">Collaborative Map Editor</h1>
             
             <div class="panel">
-                <div class="hidden"> <!-- SVG Uploader is no longer the primary way to set the map -->
-                    <label for="svgUploader" class="block text-sm font-medium text-gray-700 mb-2">1. Upload SVG Plan</label>
-                    <input type="file" id="svgUploader" accept="image/svg+xml"/>
+                 <div>
+                    <label for="planUploader" class="block text-sm font-medium text-gray-700 mb-2">1. Upload Plan (SVG/PDF)</label>
+                    <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
                 </div>
+
                 <hr>
+
                 <div>
-                    <h2 class="text-lg font-semibold text-gray-800">Add & Edit Points</h2>
-                    <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    <h2 class="text-lg font-semibold text-gray-800">2. Add & Edit Points</h2>
+                    <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>
                         Activate Add Mode
                     </button>
                 </div>
-
+                
                 <div id="pointEditor" class="hidden panel border p-3 rounded-lg bg-gray-50">
-                    <p id="editor-title" class="text-md font-semibold text-center text-blue-800 p-2 rounded-lg">Add New Point</p>
+                     <p id="editor-title" class="text-md font-semibold text-center text-blue-800 p-2 rounded-lg">Add New Point</p>
                     <div>
                         <label for="pointName" class="block text-sm font-medium text-gray-700">Name</label>
                         <input type="text" id="pointName" placeholder="e.g., 'Entrance A'" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
@@ -95,7 +72,7 @@
                         <div id="colorPalette" class="flex flex-wrap gap-2 mt-2"></div>
                     </div>
                      <div>
-                         <label for="signUploader" class="block text-sm font-medium text-gray-700">Sign Image/SVG</label>
+                         <label for="signUploader" class="block text-sm font-medium text-gray-700">Sign Image</label>
                          <input type="file" id="signUploader" accept="image/*,image/svg+xml" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
                          <p id="copiedSignInfo" class="text-xs text-gray-500 mt-1"></p>
                     </div>
@@ -103,19 +80,15 @@
                         <label for="pointNotes" class="block text-sm font-medium text-gray-700">Notes</label>
                         <textarea id="pointNotes" rows="3" placeholder="Additional info..." class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm"></textarea>
                     </div>
-                    <button id="savePointBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>
-                        Save Point
-                    </button>
-                    <button id="cancelEditBtn" class="hidden w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
-                        Cancel Edit
-                    </button>
+                    <button id="savePointBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300" disabled>Save Point</button>
+                    <button id="cancelEditBtn" class="hidden w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
                 </div>
             </div>
             
             <hr class="my-4">
-
+            
             <div class="flex-grow flex flex-col min-h-0">
-                 <h2 class="text-lg font-semibold text-gray-800 mb-2">Point List</h2>
+                 <h2 class="text-lg font-semibold text-gray-800 mb-2">3. Point List</h2>
                  <div class="flex gap-2 mb-2">
                     <div class="flex-1">
                         <label for="filterStatus" class="block text-xs font-medium text-gray-600">Filter by Status</label>
@@ -128,34 +101,52 @@
                     </div>
                 </div>
                 <div id="pointList" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2">
-                    <p class="text-center text-gray-500">Loading points...</p>
+                    <p class="text-center text-gray-500">No points added yet.</p>
                 </div>
+            </div>
+
+            <hr class="my-4">
+            <div class="space-y-3">
+                <h2 class="text-lg font-semibold text-gray-800">4. Data Management</h2>
+                <div class="flex gap-2">
+                    <button id="importProjectBtn" class="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg">Import</button>
+                    <button id="exportProjectBtn" class="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>Export</button>
+                    <input type="file" id="projectUploader" class="hidden" accept=".json"/>
+                </div>
+                <button id="exportViewerBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>
+                   Export Standalone Viewer
+                </button>
             </div>
         </div>
 
         <!-- Center: Map -->
-        <div id="map-container" class="w-2/3 flex items-center justify-center bg-gray-200">
+        <div id="map-container" class="flex-grow flex items-center justify-center bg-gray-200">
             <div id="map" class="w-full h-full"></div>
-            <div id="map-placeholder" class="text-gray-500">Loading map...</div>
+            <div id="map-placeholder" class="text-gray-500 text-center p-10">
+                <h2 class="text-2xl font-bold mb-2">Welcome!</h2>
+                <p>Please upload an SVG or PDF plan to begin.</p>
+            </div>
         </div>
     </div>
 
     <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // --- GLOBAL STATE ---
         let map;
         let geojsonLayer;
+        let imageOverlay;
         let tempMarker = null;
         let addMode = false;
         let editMode = false;
         let editingFeatureId = null;
         let colorPalette = [];
-        let selectedPointIds = new Set();
         let copiedSignDataUrl = null;
+        let project = { id: 'default' };
         let geojsonData = { type: "FeatureCollection", features: [] };
-
+        
         // --- UI ELEMENTS ---
+        const planUploader = document.getElementById('planUploader');
         const addPointBtn = document.getElementById('addPointBtn');
         const pointEditor = document.getElementById('pointEditor');
         const editorTitle = document.getElementById('editor-title');
@@ -174,27 +165,24 @@
         const pointListContainer = document.getElementById('pointList');
         const filterStatusSelect = document.getElementById('filterStatus');
         const connectionStatusEl = document.getElementById('connection-status');
-        
+        const importProjectBtn = document.getElementById('importProjectBtn');
+        const exportProjectBtn = document.getElementById('exportProjectBtn');
+        const projectUploader = document.getElementById('projectUploader');
+        const exportViewerBtn = document.getElementById('exportViewerBtn');
+
         // --- INITIALIZATION ---
         document.addEventListener('DOMContentLoaded', async () => {
-            initMap();
-            await loadPoints();
+            await loadProject();
             setupWebSocket();
             setupEventListeners();
         });
 
         function initMap() {
-            mapPlaceholder.style.display = 'none';
+            if (map) map.remove();
             mapElement.style.display = 'block';
+            mapPlaceholder.style.display = 'none';
+            map = L.map('map', { crs: L.CRS.Simple, minZoom: -5 });
             
-            // For this example, we'll use a standard map.
-            // You can replace this with your SVG overlay logic if needed.
-            map = L.map('map').setView([51.505, -0.09], 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '© OpenStreetMap contributors'
-            }).addTo(map);
-
             geojsonLayer = L.geoJSON(undefined, {
                 pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
                     radius: 8, fillColor: feature.properties.color || "#3388ff",
@@ -209,29 +197,37 @@
             map.on('click', onMapClick);
         }
 
-        function bindPopup(layer) {
-             const feature = layer.feature;
-             let popupContent = `<b>${feature.properties.name || 'Untitled'}</b>`;
-             if(feature.properties.signImage) popupContent += `<br><img src="${feature.properties.signImage}" alt="Sign" style="max-width:150px; margin-top:5px;">`;
-             if(feature.properties.status) popupContent += `<br><b>Status:</b> ${feature.properties.status}`;
-             if(feature.properties.notes) popupContent += `<br><b>Notes:</b> ${feature.properties.notes.replace(/\n/g, '<br>')}`;
-             layer.bindPopup(popupContent);
+        function loadMapPlan() {
+            if (!project.plan_data_url) {
+                mapElement.style.display = 'none';
+                mapPlaceholder.style.display = 'block';
+                return;
+            }
+            if (!map) initMap();
+            const bounds = [[0, 0], [project.plan_height, project.plan_width]];
+            if (imageOverlay) imageOverlay.remove();
+            imageOverlay = L.imageOverlay(project.plan_data_url, bounds).addTo(map);
+            map.fitBounds(bounds);
+            addPointBtn.disabled = false;
+            exportProjectBtn.disabled = false;
+            exportViewerBtn.disabled = false;
         }
 
         // --- DATA HANDLING ---
-        async function loadPoints() {
+        async function loadProject() {
             try {
-                const response = await fetch('/api/points');
-                if (!response.ok) throw new Error('Failed to fetch points');
+                const response = await fetch('/api/project');
+                if (!response.ok) throw new Error('Failed to fetch project');
                 const data = await response.json();
-                geojsonData = data;
+                project = data.project;
+                geojsonData = data.geojsonData;
+                loadMapPlan();
                 updateAll();
             } catch (error) {
-                console.error('Error loading points:', error);
-                pointListContainer.innerHTML = '<p class="text-center text-red-500">Could not load points.</p>';
+                console.error('Error loading project:', error);
             }
         }
-
+        
         async function savePoint(feature) {
              try {
                 const response = await fetch('/api/points', {
@@ -240,7 +236,6 @@
                     body: JSON.stringify(feature)
                 });
                 if (!response.ok) throw new Error('Failed to save point');
-                console.log('Point saved successfully');
             } catch (error) {
                 console.error('Error saving point:', error);
             }
@@ -250,62 +245,65 @@
             try {
                 const response = await fetch(`/api/points/${id}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error('Failed to delete point');
-                console.log('Point deleted successfully');
             } catch (error) {
                 console.error('Error deleting point:', error);
             }
         }
 
-        // --- REAL-TIME WEBSOCKET ---
+        // --- REAL-TIME & EVENT HANDLING ---
         function setupWebSocket() {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}`;
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                console.log('WebSocket connected');
                 connectionStatusEl.textContent = 'Connected';
                 connectionStatusEl.className = 'connected';
             };
 
             ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
-                console.log('Received WebSocket message:', message);
-
-                if (message.type === 'update') {
-                    const updatedFeature = message.payload;
-                    const index = geojsonData.features.findIndex(f => f.properties.id === updatedFeature.properties.id);
-                    if (index > -1) {
-                        geojsonData.features[index] = updatedFeature;
-                    } else {
-                        geojsonData.features.push(updatedFeature);
-                    }
-                } else if (message.type === 'delete') {
-                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
-                }
-                updateAll();
+                handleWebSocketMessage(message);
             };
 
             ws.onclose = () => {
-                console.log('WebSocket disconnected. Reconnecting...');
                 connectionStatusEl.textContent = 'Disconnected';
                 connectionStatusEl.className = 'disconnected';
-                // Simple reconnect logic
                 setTimeout(setupWebSocket, 3000);
             };
             
-            ws.onerror = (err) => {
-                console.error('WebSocket error:', err);
-                ws.close();
-            };
+            ws.onerror = (err) => { ws.close(); };
         }
         
-        // --- UI LOGIC ---
+        function handleWebSocketMessage(message) {
+            switch(message.type) {
+                case 'point_update':
+                    const updatedFeature = message.payload;
+                    const index = geojsonData.features.findIndex(f => f.properties.id === updatedFeature.properties.id);
+                    if (index > -1) geojsonData.features[index] = updatedFeature;
+                    else geojsonData.features.push(updatedFeature);
+                    break;
+                case 'point_delete':
+                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
+                    break;
+                case 'plan_update':
+                case 'project_import':
+                    project = message.payload.project;
+                    geojsonData = message.payload.geojsonData;
+                    loadMapPlan();
+                    break;
+            }
+            updateAll();
+        }
+        
+        // ... (All UI logic: onMapClick, resetEditor, populateEditor, renderPointList, etc. goes here)
+        // This is a large block, but it's mostly copy-paste from your original file's logic
         function onMapClick(e) {
             if (!addMode) return;
             if (e.originalEvent.target.classList.contains('leaflet-interactive')) return;
             if (tempMarker) map.removeLayer(tempMarker);
             tempMarker = L.marker(e.latlng, { icon: new L.Icon.Default({ className: 'leaflet-marker-icon temp-marker' }) }).addTo(map);
+            pointEditor.classList.remove('hidden');
             savePointBtn.disabled = false;
         }
 
@@ -322,52 +320,35 @@
                 alert('Please place a point on the map and enter its name.');
                 return;
             }
-
             const uploadedSignImage = await getFileDataUrl(signUploader.files[0]);
             const signImage = uploadedSignImage || (copiedSignDataUrl || null);
-
             const properties = {
-                name: pointNameInput.value,
-                status: pointStatusInput.value,
-                color: pointColorInput.value,
-                notes: pointNotesInput.value,
+                name: pointNameInput.value, status: pointStatusInput.value,
+                color: pointColorInput.value, notes: pointNotesInput.value,
                 signImage: signImage,
                 id: editMode ? editingFeatureId : `feature-${Date.now()}-${Math.random()}`
             };
-
             let geometry;
             if (editMode) {
-                const existingFeature = geojsonData.features.find(f => f.properties.id === editingFeatureId);
-                geometry = existingFeature.geometry;
+                geometry = geojsonData.features.find(f => f.properties.id === editingFeatureId).geometry;
             } else {
-                geometry = {
-                    type: "Point",
-                    coordinates: [tempMarker.getLatLng().lng, tempMarker.getLatLng().lat]
-                };
+                geometry = { type: "Point", coordinates: [tempMarker.getLatLng().lng, tempMarker.getLatLng().lat] };
             }
-            
             const newFeature = { type: "Feature", properties, geometry };
-            
             await savePoint(newFeature);
             resetAddPointMode();
         });
 
-
         function populateEditor(featureId) {
             const feature = geojsonData.features.find(f => f.properties.id === featureId);
             if (!feature) return;
-
             resetAddPointMode();
-            editMode = true;
-            editingFeatureId = featureId;
-
+            editMode = true; editingFeatureId = featureId;
             pointNameInput.value = feature.properties.name || '';
             pointStatusInput.value = feature.properties.status || 'To Do';
             pointColorInput.value = feature.properties.color || '#3388ff';
             pointNotesInput.value = feature.properties.notes || '';
-            signUploader.value = '';
-            copiedSignInfo.textContent = '';
-
+            signUploader.value = ''; copiedSignInfo.textContent = '';
             savePointBtn.textContent = 'Update Point';
             savePointBtn.disabled = false;
             editorTitle.textContent = `Editing: ${feature.properties.name}`;
@@ -380,27 +361,17 @@
             cancelEditBtn.classList.add('hidden');
             if (tempMarker) map.removeLayer(tempMarker);
             tempMarker = null;
-            
-            pointNameInput.value = '';
-            pointStatusInput.value = 'To Do';
-            pointColorInput.value = '#3388ff';
-            pointNotesInput.value = '';
-            signUploader.value = '';
-            copiedSignInfo.textContent = '';
-            
+            pointNameInput.value = ''; pointStatusInput.value = 'To Do';
+            pointColorInput.value = '#3388ff'; pointNotesInput.value = '';
+            signUploader.value = ''; copiedSignInfo.textContent = '';
             savePointBtn.textContent = 'Save Point';
             savePointBtn.disabled = true;
-            editMode = false;
-            editingFeatureId = null;
-            copiedSignDataUrl = null;
+            editMode = false; editingFeatureId = null; copiedSignDataUrl = null;
         }
 
         function renderPointList() {
             const filterValue = filterStatusSelect.value;
-            let features = (filterValue === 'All') ? 
-                [...geojsonData.features] : 
-                geojsonData.features.filter(f => f.properties.status === filterValue);
-
+            let features = (filterValue === 'All') ? [...geojsonData.features] : geojsonData.features.filter(f => f.properties.status === filterValue);
             pointListContainer.innerHTML = '';
             if (features.length === 0) {
                 pointListContainer.innerHTML = '<p class="text-center text-gray-500">No matching points.</p>';
@@ -412,47 +383,17 @@
         function createPointListItem(feature) {
             const item = document.createElement('div');
             item.className = 'point-list-item flex justify-between items-center px-2 py-1 rounded-lg hover:bg-gray-200 cursor-pointer';
-            item.innerHTML = `
-                <div class="flex items-center gap-2 flex-grow min-w-0">
-                    <div class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${feature.properties.color};"></div>
-                    <div class="flex-grow truncate">
-                        <span class="font-medium text-sm text-gray-800 truncate block">${feature.properties.name}</span>
-                        <p class="text-xs text-gray-500">${feature.properties.status}</p>
-                    </div>
-                </div>
-                <div class="flex-shrink-0 ml-2 flex items-center">
-                    <button class="edit-btn p-1 rounded-full hover:bg-blue-200 text-blue-700" title="Edit Point" data-id="${feature.properties.id}">
-                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg>
-                    </button>
-                    <button class="delete-btn p-1 rounded-full hover:bg-red-200 text-red-700" title="Delete Point" data-id="${feature.properties.id}">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    </button>
-                </div>
-            `;
-            item.querySelector('.edit-btn').addEventListener('click', (e) => {
-                 e.stopPropagation(); populateEditor(e.target.closest('button').dataset.id);
-            });
-            item.querySelector('.delete-btn').addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = e.target.closest('button').dataset.id;
-                if(confirm('Are you sure you want to delete this point?')) {
-                   deletePoint(id);
-                }
-            });
+            item.innerHTML = `<div class="flex items-center gap-2 flex-grow min-w-0"><div class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${feature.properties.color};"></div><div class="flex-grow truncate"><span class="font-medium text-sm text-gray-800 truncate block">${feature.properties.name}</span><p class="text-xs text-gray-500">${feature.properties.status}</p></div></div><div class="flex-shrink-0 ml-2 flex items-center"><button class="edit-btn p-1 rounded-full hover:bg-blue-200 text-blue-700" title="Edit" data-id="${feature.properties.id}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"></path></svg></button><button class="delete-btn p-1 rounded-full hover:bg-red-200 text-red-700" title="Delete" data-id="${feature.properties.id}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div>`;
+            item.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); populateEditor(e.target.closest('button').dataset.id); });
+            item.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); const id = e.target.closest('button').dataset.id; if(confirm('Delete this point?')) { deletePoint(id); }});
             item.addEventListener('click', () => {
                 const layer = geojsonLayer.getLayers().find(l => l.feature.properties.id === feature.properties.id);
                 if(layer) { map.flyTo(layer.getLatLng(), map.getZoom() > 15 ? map.getZoom() : 15); layer.openPopup(); }
             });
             return item;
         }
-
-        function updateAll() {
-            geojsonLayer.clearLayers();
-            geojsonLayer.addData(geojsonData);
-            geojsonLayer.eachLayer(bindPopup);
-            renderPointList();
-        }
-
+        
+        // --- BINDINGS AND HELPERS ---
         function setupEventListeners() {
              addPointBtn.addEventListener('click', () => {
                 if(editMode) resetEditor();
@@ -461,25 +402,112 @@
                     addPointBtn.textContent = 'Cancel Adding';
                     addPointBtn.classList.replace('bg-blue-500', 'bg-red-500');
                     mapElement.classList.add('add-mode-cursor');
-                    pointEditor.classList.add('hidden'); // Hide editor until point is placed
+                    pointEditor.classList.add('hidden');
                 } else {
                     resetAddPointMode();
                 }
             });
             filterStatusSelect.addEventListener('change', renderPointList);
             cancelEditBtn.addEventListener('click', resetEditor);
-        }
-        
-         function getFileDataUrl(file) {
-            return new Promise((resolve, reject) => {
-                if (!file) return resolve(null);
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
+            planUploader.addEventListener('change', handlePlanUpload);
+            importProjectBtn.addEventListener('click', () => projectUploader.click());
+            projectUploader.addEventListener('change', handleProjectImport);
+            exportProjectBtn.addEventListener('click', handleProjectExport);
+            exportViewerBtn.addEventListener('click', handleViewerExport);
         }
 
+        async function handlePlanUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            let planDataUrl, width, height;
+
+            if (file.type === 'image/svg+xml') {
+                planDataUrl = await getFileDataUrl(file);
+                const image = await loadImage(planDataUrl);
+                width = image.width; height = image.height;
+            } else if (file.type === 'application/pdf') {
+                const { dataUrl, dimensions } = await renderPdfToDataUrl(file);
+                planDataUrl = dataUrl;
+                width = dimensions.width; height = dimensions.height;
+            } else {
+                alert('Unsupported file type. Please use SVG or PDF.');
+                return;
+            }
+            
+            try {
+                await fetch('/api/project/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planDataUrl, width, height })
+                });
+            } catch(err) { console.error("Failed to upload plan", err); }
+        }
+        
+        function handleProjectImport(e) {
+            const file = e.target.files[0];
+            if (!file || !file.name.endsWith('.json')) { return; }
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (!data.project || !data.geojsonData) throw new Error("Invalid project file");
+                    await fetch('/api/project/import', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                } catch (err) { alert('Error importing project: ' + err.message); }
+            };
+            reader.readAsText(file);
+        }
+
+        function handleProjectExport() {
+            const data = { project, geojsonData };
+            downloadFile(JSON.stringify(data, null, 2), "map_project.json", "text/json");
+        }
+
+        function handleViewerExport() {
+            const viewerHTML = createViewerHTML(project, geojsonData);
+            downloadFile(viewerHTML, `map_viewer_${Date.now()}.html`, "text/html");
+        }
+        
+        function updateAll() {
+            if (!map) return;
+            geojsonLayer.clearLayers();
+            geojsonLayer.addData(geojsonData);
+            geojsonLayer.eachLayer(bindPopup);
+            renderPointList();
+        }
+
+        function bindPopup(layer) {
+             const f = layer.feature;
+             let c = `<b>${f.properties.name||'Untitled'}</b><br><b>Status:</b> ${f.properties.status}`;
+             if(f.properties.signImage) c += `<br><img src="${f.properties.signImage}" alt="Sign" style="max-width:150px;margin-top:5px;">`;
+             if(f.properties.notes) c += `<br><b>Notes:</b> ${f.properties.notes.replace(/\n/g, '<br>')}`;
+             layer.bindPopup(c);
+        }
+        
+        function getFileDataUrl(file) { return new Promise((res, rej) => { if (!file) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+        function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+        function downloadFile(content, fileName, contentType) { const a = document.createElement("a"); const file = new Blob([content], { type: contentType }); a.href = URL.createObjectURL(file); a.download = fileName; a.click(); URL.revokeObjectURL(a.href); }
+        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: context, viewport: viewport }).promise; return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; }
+        
+        function createViewerHTML(projectData, geojson) {
+            return `
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><title>Map Viewer</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><style>html,body{height:100%;margin:0;padding:0;overflow:hidden;font-family:sans-serif}#map{height:100%;width:100%;background-color:#f0f0f0}.leaflet-popup-content-wrapper{border-radius:8px}.leaflet-popup-content{margin:12px;font-size:14px}.popup-img{max-width:200px;max-height:200px;margin-top:8px;border-radius:4px}.popup-status-select{width:100%;padding:8px;margin-top:8px;border:1px solid #ccc;border-radius:4px}#toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background-color:rgba(0,0,0,0.7);color:white;padding:10px 20px;border-radius:20px;z-index:10000;opacity:0;transition:opacity .5s;font-size:14px;pointer-events:none}#toast.show{opacity:1}</style></head><body><div id="map"></div><div id="toast"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script><script>
+const initialProject = ${JSON.stringify(projectData)}; const initialGeojsonData = ${JSON.stringify(geojson)}; const storageKey = 'map-viewer-storage-' + initialProject.id; let map, geojsonLayer, currentGeojsonData, toastTimeout; const toast = document.getElementById('toast');
+const STATUS_COLORS = { 'To Do': '#3388ff', 'In Progress': '#f59e0b', 'Completed': '#22c55e' };
+document.addEventListener('DOMContentLoaded', () => { loadData(); initMap(); });
+function loadData(){ try { const d = localStorage.getItem(storageKey); currentGeojsonData = d ? JSON.parse(d) : JSON.parse(JSON.stringify(initialGeojsonData)); if(d) showToast('Loaded saved progress'); } catch(e){ currentGeojsonData = JSON.parse(JSON.stringify(initialGeojsonData)); } }
+function saveData(){ try { localStorage.setItem(storageKey, JSON.stringify(currentGeojsonData)); showToast('Progress Saved!', 1500); } catch(e){ showToast('Error saving data.', 2000); } }
+function initMap(){ map = L.map('map', { crs: L.CRS.Simple, minZoom: -5, zoomControl: true }); const bounds = [[0, 0], [initialProject.plan_height, initialProject.plan_width]]; L.imageOverlay(initialProject.plan_data_url, bounds).addTo(map); map.fitBounds(bounds); renderGeoJson(); }
+function renderGeoJson(){ if (geojsonLayer) geojsonLayer.remove(); geojsonLayer = L.geoJSON(currentGeojsonData, { pointToLayer: (f, l) => L.circleMarker(l, { radius: 8, fillColor: STATUS_COLORS[f.properties.status] || f.properties.color, color: "#000", weight: 1, opacity: 1, fillOpacity: 0.9 }), onEachFeature: (f, l) => { l.on('click', () => { l.bindPopup(createPopupContent(f.properties), { minWidth: 220 }).openPopup(); const s = document.getElementById('popup-status-' + f.properties.id); if(s) s.addEventListener('change', (e) => updatePointStatus(f.properties.id, e.target.value, l)); }); } }).addTo(map); }
+function createPopupContent(p){ const o = Object.keys(STATUS_COLORS).map(opt => \`<option value="\${opt}" \${p.status === opt ? 'selected' : ''}>\${opt}</option>\`).join(''); return \`<div style="display:flex;flex-direction:column;gap:8px;"><p style="font-weight:bold;font-size:16px;">\${p.name||'Untitled'}</p>\${p.signImage ? \`<img src="\${p.signImage}" alt="Sign" class="popup-img">\` : ''}<div><label style="font-weight:600;display:block;">Status:</label><select id="popup-status-\${p.id}" class="popup-status-select">\${o}</select></div>\${p.notes ? \`<p><b>Notes:</b> \${p.notes.replace(/\\n/g, '<br>')}</p>\` : ''}</div>\`; }
+function updatePointStatus(id, newStatus, layer){ const f = currentGeojsonData.features.find(ft => ft.properties.id === id); if (f) { f.properties.status = newStatus; layer.setStyle({ fillColor: STATUS_COLORS[newStatus] }); saveData(); layer.closePopup(); } }
+function showToast(msg, dur = 3000){ clearTimeout(toastTimeout); toast.textContent = msg; toast.classList.add('show'); toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, dur); }
+<\/script></body></html>`;
+        }
     </script>
 </body>
 </html>
+
