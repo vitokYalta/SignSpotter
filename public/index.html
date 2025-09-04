@@ -17,95 +17,121 @@
     </script>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
-        #map { height: 100%; width: 100%; background-color: #f0f0f0; }
-        #map.add-mode-cursor { cursor: crosshair !important; }
+        .screen { display: none; width: 100%; height: 100%; }
+        .screen.active { display: flex; }
+        #map-container, #plan-editor-container { flex-grow: 1; height: 100vh; }
         .leaflet-marker-icon.temp-marker { filter: hue-rotate(150deg) brightness(1.2); }
-        #connection-status { position: fixed; bottom: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; transition: background-color 0.3s; }
+        #connection-status { position: fixed; bottom: 10px; right: 10px; z-index: 1001; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; }
         #connection-status.connected { background-color: #22c55e; }
         #connection-status.disconnected { background-color: #ef4444; }
-        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.2rem; display: none; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); z-index: 10000; display: none; align-items: center; justify-content: center; color: white; font-size: 1.2rem; }
         .leaflet-distortable-image-handle { background-color: rgba(255, 255, 0, 0.8) !important; border: 2px solid #333 !important; }
         .leaflet-control-geolocation { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2L7 22l10-5-5-10z'/%3E%3C/svg%3E"); background-size: 18px 18px; background-repeat: no-repeat; background-position: center; }
     </style>
 </head>
 <body class="bg-gray-100">
+
     <div id="loading-overlay">Please wait...</div>
-    <div class="flex h-screen">
-        <!-- Left Panel: Controls -->
-        <div class="w-1/3 max-w-sm bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
-            <h1 class="text-xl font-bold text-gray-800 mb-4">Dynamic Map Editor</h1>
-            
-            <!-- Project Actions -->
-            <div class="space-y-2">
-                <button id="settingsBtn" class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">Project Settings</button>
-                <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+
+    <!-- Screen 1: Project Hub -->
+    <div id="project-hub-screen" class="screen active flex-col items-center justify-center bg-gray-200">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">Dynamic Map Editor</h1>
+        <div class="space-y-4">
+            <button id="create-project-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg">Create New Project</button>
+            <button id="load-project-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-lg">Load Existing Project</button>
+        </div>
+         <input type="file" id="project-importer" class="hidden" accept=".json"/>
+    </div>
+    
+    <!-- Screen 2: Main Editor (houses Plan Editor and Map Positioner) -->
+    <div id="main-editor-screen" class="screen flex-row">
+        <!-- Left Panel -->
+        <div id="side-panel" class="w-1/3 max-w-sm bg-white p-4 shadow-lg overflow-y-auto flex flex-col">
+            <!-- Panel Header -->
+            <div class="flex justify-between items-center mb-4">
+                 <h1 class="text-xl font-bold text-gray-800">Editor</h1>
+                 <button id="back-to-hub-btn" class="text-sm text-blue-600 hover:underline">Back to Hub</button>
+            </div>
+           
+            <!-- Mode Switcher -->
+            <div class="flex bg-gray-200 rounded-lg p-1 mb-4">
+                <button id="switchToPlanEditorBtn" class="flex-1 py-2 px-4 text-sm font-semibold rounded-md bg-white shadow">Plan Editor</button>
+                <button id="switchToMapPositionerBtn" class="flex-1 py-2 px-4 text-sm font-semibold text-gray-600">Map Positioner</button>
+            </div>
+
+            <!-- Plan-specific actions -->
+            <div id="plan-actions-container">
+                 <h2 class="text-lg font-semibold text-gray-800 mb-2">Plan</h2>
+                 <input type="file" id="planUploader" accept="image/svg+xml,application/pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                 <div id="map-positioner-controls" class="hidden mt-2 space-y-2">
+                     <button id="adjustPlanBtn" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Adjust Plan Position</button>
+                     <button id="lockPlanBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg hidden">Lock Plan</button>
+                     <div>
+                         <label for="opacity-slider" class="block text-sm font-medium text-gray-700">Opacity</label>
+                         <input type="range" id="opacity-slider" min="0" max="1" step="0.1" class="w-full">
+                     </div>
+                 </div>
             </div>
 
             <hr class="my-4">
-
-            <!-- Plan Actions -->
-            <div id="planActions" class="space-y-2 hidden">
-                 <button id="adjustPlanBtn" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Adjust Plan Position</button>
-                 <button id="lockPlanBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg hidden">Lock Plan</button>
-            </div>
             
+             <!-- Settings -->
+            <div>
+                 <button id="settingsBtn" class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">Project Settings</button>
+            </div>
+
             <hr class="my-4">
 
             <!-- Points Section -->
-            <div>
+            <div id="points-section">
                 <h2 class="text-lg font-semibold text-gray-800">Map Points</h2>
-                <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>Add Point</button>
+                <button id="addPointBtn" class="mt-2 w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition" disabled>Add Point</button>
                 <div id="pointEditorContainer" class="mt-4"></div>
-            </div>
-            
-            <div class="flex-grow flex flex-col min-h-0 mt-4">
-                 <div id="pointListContainer" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2">
-                    <p class="text-center text-gray-500">No points to display.</p>
+                <div class="flex-grow flex flex-col min-h-0 mt-4">
+                     <div id="pointListContainer" class="flex-grow overflow-y-auto bg-gray-50 border rounded-lg p-2 mt-2 min-h-[100px]">
+                        <p class="text-center text-gray-500">No points to display.</p>
+                    </div>
                 </div>
             </div>
-
         </div>
-
-        <!-- Center: Map -->
-        <div class="flex-grow bg-gray-200">
-            <div id="map"></div>
+        <!-- Main Content Area (for maps) -->
+        <div class="flex-grow relative">
+             <div id="plan-editor-container" class="w-full h-full"></div>
+             <div id="map-container" class="w-full h-full hidden"></div>
         </div>
     </div>
-
+    
     <!-- Connection Status -->
-    <div id="connection-status" class="disconnected">Connecting...</div>
+    <div id="connection-status">Connecting...</div>
     
     <!-- Settings Modal -->
     <div id="settingsModal" class="fixed inset-0 z-[1000] flex items-center justify-center hidden">
-        <!-- Backdrop -->
         <div id="modalBackdrop" class="fixed inset-0 bg-black bg-opacity-50"></div>
-        <!-- Modal Content -->
         <div class="bg-white rounded-lg shadow-xl m-4 sm:max-w-xl sm:w-full relative z-10 max-h-[90vh] flex flex-col">
-            <div class="p-4 border-b">
-                <h3 class="text-lg leading-6 font-medium text-gray-900">Project Settings</h3>
-            </div>
+            <div class="p-4 border-b"><h3 class="text-lg font-medium text-gray-900">Project Settings</h3></div>
             <div class="p-4 overflow-y-auto">
                 <h4 class="font-semibold text-gray-800 mb-2">Point Field Builder</h4>
                 <div id="schemaBuilder" class="space-y-3"></div>
-                <button id="addFieldBtn" class="mt-3 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 font-bold py-1 px-3 rounded-lg">+ Add Field</button>
+                <button id="addFieldBtn" class="mt-3 text-sm bg-blue-100 hover:bg-blue-200 font-bold py-1 px-3 rounded-lg">+ Add Field</button>
             </div>
             <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
-                 <button id="closeSettingsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Close</button>
-                 <button id="saveSettingsBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Save Settings</button>
+                 <button id="closeSettingsBtn" class="bg-gray-200 hover:bg-gray-300 font-bold py-2 px-4 rounded-lg">Close</button>
+                 <button id="saveSettingsBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Save & Continue</button>
             </div>
         </div>
     </div>
 
-    <!-- Leaflet JS & Plugins (Order is important) -->
+    <!-- Leaflet JS & Plugins -->
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
     <script src="https://unpkg.com/leaflet-distortableimage/dist/leaflet.distortableimage.js"></script>
     
     <script>
         // --- GLOBAL STATE ---
-        let map, geojsonLayer, planOverlay, userLocationMarker;
+        let planMap, realMap, geojsonLayerPlan, geojsonLayerReal, planOverlay, userLocationMarker;
         let project = { id: 'default', point_schema: [] };
         let geojsonData = { type: "FeatureCollection", features: [] };
+        let currentScreen = 'hub';
         
         // --- CONSTANTS ---
         const IS_PREVIEW = !window.location.host;
@@ -116,265 +142,125 @@
         const ui = {
             loadingOverlay: document.getElementById('loading-overlay'),
             connectionStatus: document.getElementById('connection-status'),
-            settingsBtn: document.getElementById('settingsBtn'),
+            // Hub
+            projectHubScreen: document.getElementById('project-hub-screen'),
+            createProjectBtn: document.getElementById('create-project-btn'),
+            loadProjectBtn: document.getElementById('load-project-btn'),
+            // Main Editor
+            mainEditorScreen: document.getElementById('main-editor-screen'),
+            backToHubBtn: document.getElementById('back-to-hub-btn'),
+            switchToPlanEditorBtn: document.getElementById('switchToPlanEditorBtn'),
+            switchToMapPositionerBtn: document.getElementById('switchToMapPositionerBtn'),
+            planEditorContainer: document.getElementById('plan-editor-container'),
+            mapContainer: document.getElementById('map-container'),
+            mapPositionerControls: document.getElementById('map-positioner-controls'),
+            opacitySlider: document.getElementById('opacity-slider'),
+            // Side Panel
             planUploader: document.getElementById('planUploader'),
-            planActions: document.getElementById('planActions'),
+            settingsBtn: document.getElementById('settingsBtn'),
             adjustPlanBtn: document.getElementById('adjustPlanBtn'),
             lockPlanBtn: document.getElementById('lockPlanBtn'),
             addPointBtn: document.getElementById('addPointBtn'),
             pointEditorContainer: document.getElementById('pointEditorContainer'),
             pointListContainer: document.getElementById('pointListContainer'),
+            // Settings Modal
             settingsModal: document.getElementById('settingsModal'),
             modalBackdrop: document.getElementById('modalBackdrop'),
             schemaBuilder: document.getElementById('schemaBuilder'),
             addFieldBtn: document.getElementById('addFieldBtn'),
             closeSettingsBtn: document.getElementById('closeSettingsBtn'),
             saveSettingsBtn: document.getElementById('saveSettingsBtn'),
-            map: document.getElementById('map')
         };
         
         // --- INITIALIZATION ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            initMap();
-            await loadProject();
-            if (!IS_PREVIEW) {
-                setupWebSocket();
-            } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            showScreen('hub');
+            if (!IS_PREVIEW) setupWebSocket();
+            else {
                 ui.connectionStatus.textContent = 'Real-time disabled';
                 ui.connectionStatus.className = 'disconnected';
             }
             setupEventListeners();
         });
 
-        function initMap() {
-            map = L.map('map', { maxZoom: 22 }).setView(VANCOUVER_COORDS, 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap'
-            }).addTo(map);
-
-            // Add Geolocation control
+        function initPlanEditorMap() {
+            if (planMap) planMap.remove();
+            planMap = L.map('plan-editor-container', { crs: L.CRS.Simple, minZoom: -5 });
+            planMap.on('click', () => { ui.pointEditorContainer.innerHTML = ''; });
+        }
+        
+        function initRealMap() {
+            if (realMap) realMap.remove();
+            realMap = L.map('map-container', { maxZoom: 22 }).setView(VANCOUVER_COORDS, 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(realMap);
+             // Geolocation Control
             L.Control.Geolocation = L.Control.extend({
-                onAdd: function(map) {
+                onAdd: (map) => {
                     const btn = L.DomUtil.create('a', 'leaflet-control-geolocation leaflet-bar leaflet-control');
                     btn.title = 'Show my location';
-                    btn.href = '#';
-                    btn.setAttribute('role', 'button');
-
-                    L.DomEvent.on(btn, 'click', L.DomEvent.stop).on(btn, 'click', function() {
-                        if (!("geolocation" in navigator)) {
-                            alert("Geolocation is not supported by your browser.");
-                            return;
-                        }
-                        navigator.geolocation.getCurrentPosition(position => {
-                            const latlng = [position.coords.latitude, position.coords.longitude];
-                            if (userLocationMarker) {
-                                userLocationMarker.setLatLng(latlng);
-                            } else {
-                                userLocationMarker = L.circle(latlng, {
-                                    radius: 10,
-                                    color: 'blue',
-                                    fillColor: '#3498db',
-                                    fillOpacity: 0.8
-                                }).addTo(map);
+                    L.DomEvent.on(btn, 'click', L.DomEvent.stop).on(btn, 'click', () => {
+                        navigator.geolocation.getCurrentPosition(pos => {
+                            const latlng = [pos.coords.latitude, pos.coords.longitude];
+                            if (!userLocationMarker) {
+                                userLocationMarker = L.circle(latlng, { radius: 10, color: 'blue', fillColor: '#3498db', fillOpacity: 0.8 }).addTo(map);
                             }
+                            userLocationMarker.setLatLng(latlng);
                             map.flyTo(latlng, 18);
-                        }, error => {
-                            alert(`Geolocation Error: ${error.message}`);
-                        });
+                        }, err => alert(`Geolocation Error: ${err.message}`));
                     });
-
                     return btn;
                 }
             });
-            new L.Control.Geolocation({ position: 'topleft' }).addTo(map);
+            new L.Control.Geolocation({ position: 'topleft' }).addTo(realMap);
         }
-        
-        // --- DATA & SERVER COMMUNICATION ---
-        async function loadProject() {
-            if (IS_PREVIEW) {
-                console.warn("Running in preview mode. API calls are disabled.");
-                handleProjectUpdate({ project: { id: 'preview', point_schema: [{name: 'Name', type: 'text'}, {name: 'Status', type: 'select', options:['Open', 'Closed']}] }, geojsonData: { type: "FeatureCollection", features: [] } });
-                return;
-            }
+
+        // --- SCREEN MANAGEMENT ---
+        function showScreen(screenName) {
+            currentScreen = screenName;
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(`${screenName}-screen`).classList.add('active');
+        }
+
+        // --- DATA & SERVER ---
+        async function loadProjectData() {
+            if (IS_PREVIEW) return; // Skip in preview
             try {
                 const response = await fetch('/api/project');
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const data = await response.json();
                 handleProjectUpdate(data);
+                return data;
             } catch (error) {
                 console.error('Error loading project:', error);
                 alert('Failed to load project from server.');
+                return null;
             }
         }
         
-        async function sendSettings(settings) {
-            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
-            try {
-                const response = await fetch('/api/project/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
-                });
-                if (!response.ok) throw new Error('Failed to save settings');
-            } catch (err) {
-                alert('Error saving settings: ' + err.message);
-            }
-        }
-
-        // --- MAP & PLAN LOGIC ---
-        function renderPlan() {
-            if (planOverlay) {
-                planOverlay.remove();
-                planOverlay = null;
-            }
-            if (project.plan_data_url) {
-                const corners = project.plan_corners ? project.plan_corners.map(c => L.latLng(c.lat, c.lng)) : null;
-                planOverlay = L.distortableImageOverlay(project.plan_data_url, { corners }).addTo(map);
-                ui.planActions.classList.remove('hidden');
-                ui.addPointBtn.disabled = false;
-                if (!project.plan_corners) { 
-                     map.setView(VANCOUVER_COORDS, 15);
-                }
-            } else {
-                ui.planActions.classList.add('hidden');
-                ui.addPointBtn.disabled = true;
-            }
-        }
-
-        // --- DYNAMIC FORM BUILDER ---
-        function renderPointEditor(featureId = null) {
-            let feature = null;
-            if (featureId) {
-                feature = geojsonData.features.find(f => f.properties.id === featureId);
-            }
-
-            ui.pointEditorContainer.innerHTML = ''; // Clear previous form
-            const form = document.createElement('form');
-            form.className = 'panel border p-3 rounded-lg bg-gray-50';
-            
-            const title = document.createElement('p');
-            title.className = 'text-md font-semibold text-center text-blue-800 p-2 rounded-lg';
-            title.textContent = featureId ? 'Editing Point' : 'New Point';
-            form.appendChild(title);
-
-            // Generate fields from schema
-            (project.point_schema || []).forEach(field => {
-                const value = feature ? feature.properties[field.name] : '';
-                form.appendChild(createFormField(field, value));
-            });
-
-            const saveBtn = document.createElement('button');
-            saveBtn.type = 'submit';
-            saveBtn.className = 'w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg';
-            saveBtn.textContent = 'Save';
-            form.appendChild(saveBtn);
-            
-            const cancelBtn = document.createElement('button');
-            cancelBtn.type = 'button';
-            cancelBtn.className = 'w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg';
-            cancelBtn.textContent = 'Cancel';
-            cancelBtn.onclick = () => { ui.pointEditorContainer.innerHTML = ''; };
-            form.appendChild(cancelBtn);
-
-            form.onsubmit = async (e) => {
-                e.preventDefault();
-                await savePointFromForm(form, featureId);
-            };
-
-            ui.pointEditorContainer.appendChild(form);
-        }
-
-        function createFormField(field, value) {
-            const container = document.createElement('div');
-            container.className = 'mt-3';
-            const label = document.createElement('label');
-            label.textContent = field.name;
-            label.className = 'block text-sm font-medium text-gray-700';
-            container.appendChild(label);
-            
-            let input;
-            switch(field.type) {
-                case 'select':
-                    input = document.createElement('select');
-                    (field.options || []).forEach(opt => {
-                        const option = document.createElement('option');
-                        option.value = opt;
-                        option.textContent = opt;
-                        if (opt === value) option.selected = true;
-                        input.appendChild(option);
-                    });
-                    break;
-                case 'textarea':
-                    input = document.createElement('textarea');
-                    input.rows = 3;
-                    input.value = value || '';
-                    break;
-                case 'image':
-                     input = document.createElement('input');
-                     input.type = 'file';
-                     input.accept = 'image/*';
-                     input.dataset.currentImage = value || ''; // Store current image URL
-                     if (value) {
-                         const preview = document.createElement('img');
-                         preview.src = value;
-                         preview.className = 'w-16 h-16 mt-1 object-cover rounded';
-                         container.appendChild(preview);
-                     }
-                     break;
-                default: // text, color, date etc.
-                    input = document.createElement('input');
-                    input.type = field.type;
-                    input.value = value || '';
-            }
-            input.id = `field-${field.name}`;
-            input.name = field.name;
-            input.className = 'mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm';
-            container.appendChild(input);
-            return container;
-        }
-
-        async function savePointFromForm(form, featureId) {
-            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
-            const properties = { id: featureId || `feature-${Date.now()}` };
-            let geometry;
-
-            for (const field of project.point_schema) {
-                const input = form.querySelector(`[name="${field.name}"]`);
-                if (field.type === 'image') {
-                    if (input.files && input.files[0]) {
-                        properties[field.name] = await getFileDataUrl(input.files[0]);
-                    } else {
-                        properties[field.name] = input.dataset.currentImage || null;
-                    }
-                } else {
-                    properties[field.name] = input.value;
-                }
-            }
-
-            if (featureId) {
-                geometry = geojsonData.features.find(f => f.properties.id === featureId).geometry;
-            } else {
-                const center = map.getCenter();
-                geometry = { type: 'Point', coordinates: [center.lng, center.lat] };
-            }
-            
-            const feature = { type: "Feature", properties, geometry };
-            
-            await fetch('/api/points', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(feature)
-            });
-            ui.pointEditorContainer.innerHTML = '';
-        }
-
-        // --- EVENT LISTENERS & HANDLERS ---
+        // --- EVENT LISTENERS ---
         function setupEventListeners() {
+            // Hub
+            ui.createProjectBtn.addEventListener('click', () => {
+                project = { id: 'default', point_schema: [], plan_data_url: null, plan_corners: null, opacity: 0.7 };
+                geojsonData = { type: "FeatureCollection", features: [] };
+                openSettingsModal(true); // is new project
+            });
+            ui.loadProjectBtn.addEventListener('click', async () => {
+                const data = await loadProjectData();
+                if(data) {
+                    initMainEditor();
+                    showScreen('main-editor');
+                }
+            });
+            // Main Editor
+            ui.backToHubBtn.addEventListener('click', () => showScreen('project-hub'));
+            ui.switchToPlanEditorBtn.addEventListener('click', switchToPlanEditor);
+            ui.switchToMapPositionerBtn.addEventListener('click', switchToMapPositioner);
             ui.planUploader.addEventListener('change', handlePlanUpload);
-            ui.settingsBtn.addEventListener('click', openSettingsModal);
+            ui.settingsBtn.addEventListener('click', () => openSettingsModal(false));
             ui.modalBackdrop.addEventListener('click', closeSettingsModal);
             ui.closeSettingsBtn.addEventListener('click', closeSettingsModal);
-            ui.saveSettingsBtn.addEventListener('click', saveSettings);
+            ui.saveSettingsBtn.addEventListener('click', saveSettingsAndContinue);
             ui.addFieldBtn.addEventListener('click', addSchemaField);
             ui.adjustPlanBtn.addEventListener('click', () => {
                 if (planOverlay) {
@@ -393,130 +279,169 @@
                 }
             });
             ui.addPointBtn.addEventListener('click', () => renderPointEditor());
-        }
-
-        async function handlePlanUpload(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            if (file.size > 25 * 1024 * 1024) { // Client-side size check for stability
-                alert("File is too large. Please select a file smaller than 25MB.");
-                ui.planUploader.value = '';
-                return;
-            }
-
-            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
-
-            ui.loadingOverlay.textContent = 'Processing file...';
-            ui.loadingOverlay.style.display = 'flex';
-            
-            try {
-                let dataUrl, dimensions;
-                
-                console.log("Starting file processing...");
-                if (file.type === 'application/pdf') {
-                    ui.loadingOverlay.textContent = 'Rendering PDF (this may take a moment)...';
-                    const pdfData = await renderPdfToDataUrl(file);
-                    dataUrl = pdfData.dataUrl;
-                    dimensions = pdfData.dimensions;
-                } else {
-                    ui.loadingOverlay.textContent = 'Reading image...';
-                    dataUrl = await getFileDataUrl(file);
-                    dimensions = await getImageDimensions(dataUrl);
-                }
-                console.log("File processed into data URL.");
-
-                ui.loadingOverlay.textContent = 'Uploading to server...';
-                
-                const response = await fetch('/api/project/plan', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ planDataUrl: dataUrl, width: dimensions.width, height: dimensions.height })
-                });
-                
-                console.log("Server response status:", response.status);
-
-                if (!response.ok) {
-                    // Try to parse error message from server, otherwise use status text
-                    let errorMsg = `Server responded with status ${response.status}`;
-                    try {
-                        const errorData = await response.json();
-                        errorMsg = errorData.message || errorMsg;
-                    } catch (parseErr) {
-                        // Ignore if response is not json
-                    }
-                    throw new Error(errorMsg);
-                }
-                
-                console.log("Upload successful. The map will update shortly via WebSocket.");
-                // The server will broadcast 'plan_update', and the client's WebSocket listener will call loadProject().
-
-            } catch(err) { 
-                console.error("Error during plan upload:", err);
-                alert(`An error occurred while uploading the plan:\n\n${err.message}`);
-            } finally {
-                ui.loadingOverlay.style.display = 'none';
-                ui.planUploader.value = '';
-            }
+             ui.opacitySlider.addEventListener('input', (e) => {
+                if (planOverlay) planOverlay.setOpacity(e.target.value);
+            });
+            ui.opacitySlider.addEventListener('change', async (e) => {
+                 await sendSettings({ opacity: e.target.value });
+            });
         }
         
+        function initMainEditor() {
+            initPlanEditorMap();
+            initRealMap();
+            switchToPlanEditor();
+            handleProjectUpdate({ project, geojsonData });
+        }
+        
+        function switchToPlanEditor() {
+            ui.planEditorContainer.classList.remove('hidden');
+            ui.mapContainer.classList.add('hidden');
+            ui.mapPositionerControls.classList.add('hidden');
+            ui.switchToPlanEditorBtn.classList.add('bg-white', 'shadow');
+            ui.switchToPlanEditorBtn.classList.remove('text-gray-600');
+            ui.switchToMapPositionerBtn.classList.remove('bg-white', 'shadow');
+            ui.switchToMapPositionerBtn.classList.add('text-gray-600');
+            if(planMap) planMap.invalidateSize();
+            renderPlan(planMap);
+            renderPoints(planMap, 'plan');
+        }
+
+        function switchToMapPositioner() {
+            ui.planEditorContainer.classList.add('hidden');
+            ui.mapContainer.classList.remove('hidden');
+            ui.mapPositionerControls.classList.remove('hidden');
+            ui.switchToPlanEditorBtn.classList.remove('bg-white', 'shadow');
+            ui.switchToPlanEditorBtn.classList.add('text-gray-600');
+            ui.switchToMapPositionerBtn.classList.add('bg-white', 'shadow');
+            ui.switchToMapPositionerBtn.classList.remove('text-gray-600');
+            if(realMap) realMap.invalidateSize(); // Important: force map to redraw
+            renderPlan(realMap);
+            renderPoints(realMap, 'real');
+        }
+
+        // --- PROJECT UPDATE HANDLER ---
         function handleProjectUpdate(data) {
              project = data.project;
              geojsonData = data.geojsonData;
-             if (!project.point_schema) project.point_schema = []; // Ensure schema exists
-             renderPlan();
-             renderPoints();
+             if (!project.point_schema) project.point_schema = [];
+             
+             ui.opacitySlider.value = project.opacity || 0.7;
+
+             if(currentScreen === 'main-editor') {
+                 if (!ui.planEditorContainer.classList.contains('hidden')) {
+                     renderPlan(planMap);
+                     renderPoints(planMap, 'plan');
+                 }
+                 if (!ui.mapContainer.classList.contains('hidden')) {
+                     renderPlan(realMap);
+                     renderPoints(realMap, 'real');
+                 }
+             }
              renderPointList();
         }
 
-        function renderPoints() {
-            if (geojsonLayer) geojsonLayer.remove();
-            geojsonLayer = L.geoJSON(geojsonData, {
+        // --- RENDER FUNCTIONS ---
+        function renderPlan(targetMap) {
+            if (planOverlay) {
+                planOverlay.remove();
+                planOverlay = null;
+            }
+            if (!project.plan_data_url || !targetMap) return;
+
+            let overlayOptions = {};
+            
+            if (targetMap === realMap) {
+                 overlayOptions.corners = project.plan_corners ? project.plan_corners.map(c => L.latLng(c.lat, c.lng)) : null;
+            }
+
+            planOverlay = L.distortableImageOverlay(project.plan_data_url, overlayOptions).addTo(targetMap);
+            planOverlay.setOpacity(project.opacity || 0.7);
+
+            if (targetMap === planMap) {
+                 const img = new Image();
+                 img.onload = () => {
+                     const bounds = [[0, 0], [img.height, img.width]];
+                     planMap.fitBounds(bounds);
+                 };
+                 img.src = project.plan_data_url;
+            } else if (targetMap === realMap && !overlayOptions.corners) {
+                realMap.setView(VANCOUVER_COORDS, 15);
+            }
+            
+            ui.addPointBtn.disabled = false;
+        }
+
+        function renderPoints(targetMap, mapType) {
+            let layer = mapType === 'plan' ? geojsonLayerPlan : geojsonLayerReal;
+            if (layer) layer.remove();
+            
+            layer = L.geoJSON(geojsonData, {
                  pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-                    radius: 8,
-                    fillColor: feature.properties.Color || "#3388ff",
+                    radius: 8, fillColor: feature.properties.Color || "#3388ff",
                     color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8
                 }),
                 onEachFeature: (feature, layer) => {
-                    layer.on('click', (e) => {
-                        L.DomEvent.stopPropagation(e);
-                        renderPointEditor(feature.properties.id);
-                    });
+                    layer.on('click', L.DomEvent.stopPropagation).on('click', () => renderPointEditor(feature.properties.id));
                 }
-            }).addTo(map);
+            }).addTo(targetMap);
+            
+            if (mapType === 'plan') geojsonLayerPlan = layer;
+            else geojsonLayerReal = layer;
         }
         
         function renderPointList() {
             ui.pointListContainer.innerHTML = '';
-            if (geojsonData.features.length === 0) {
-                ui.pointListContainer.innerHTML = '<p class="text-center text-gray-500">No points to display.</p>';
-                return;
-            }
+            if (geojsonData.features.length === 0) { ui.pointListContainer.innerHTML = '<p class="text-center text-gray-500">No points to display.</p>'; return; }
             geojsonData.features.forEach(f => {
                 const item = document.createElement('div');
                 item.className = 'flex items-center p-2 rounded hover:bg-gray-100 cursor-pointer';
                 const colorField = project.point_schema.find(field => field.type === 'color');
                 const color = colorField ? (f.properties[colorField.name] || '#cccccc') : '#cccccc';
-
                 const nameField = project.point_schema.find(field => field.name.toLowerCase() === 'name');
                 const name = nameField ? (f.properties[nameField.name] || 'Untitled Point') : 'Untitled Point';
-
-                item.innerHTML = `
-                    <div class="w-4 h-4 rounded-full mr-3" style="background-color: ${color}"></div>
-                    <span>${name}</span>
-                `;
-                item.onclick = () => map.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], 18);
+                item.innerHTML = `<div class="w-4 h-4 rounded-full mr-3" style="background-color: ${color}"></div><span>${name}</span>`;
+                item.onclick = () => {
+                     if(!ui.planEditorContainer.classList.contains('hidden') && planMap) {
+                         planMap.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], planMap.getMaxZoom());
+                     }
+                };
                 ui.pointListContainer.appendChild(item);
             });
         }
         
         // --- SETTINGS MODAL ---
-        function openSettingsModal() {
+        function openSettingsModal(isNew = false) {
+            ui.saveSettingsBtn.dataset.isNew = isNew;
             renderSchemaBuilder();
             ui.settingsModal.classList.remove('hidden');
         }
         function closeSettingsModal() { 
             ui.settingsModal.classList.add('hidden');
+        }
+        
+        async function saveSettingsAndContinue() {
+            const newSchema = [];
+            document.querySelectorAll('#schemaBuilder > div').forEach(row => {
+                const name = row.querySelector('.schema-name').value.trim();
+                const type = row.querySelector('.schema-type').value;
+                const options = row.querySelector('.schema-options').value.split(',').map(s => s.trim()).filter(Boolean);
+                if (name) newSchema.push({ name, type, options });
+            });
+            project.point_schema = newSchema;
+            
+            if (!IS_PREVIEW) {
+                await sendSettings({ point_schema: newSchema });
+            }
+
+            closeSettingsModal();
+
+            if (ui.saveSettingsBtn.dataset.isNew === 'true') {
+                initMainEditor();
+                showScreen('main-editor');
+                // Prompt to upload a plan
+                setTimeout(() => alert("Project created! Now, please upload a plan file to begin."), 100);
+            }
         }
         
         function renderSchemaBuilder() {
@@ -544,13 +469,8 @@
                     <button data-index="${index}" class="ml-2 text-red-500 hover:text-red-700 remove-field-btn text-2xl font-bold">&times;</button>
                 </div>
             `;
-            div.querySelector('.schema-type').onchange = (e) => {
-                div.querySelector('.schema-options').classList.toggle('hidden', e.target.value !== 'select');
-            };
-            div.querySelector('.remove-field-btn').onclick = (e) => {
-                project.point_schema.splice(e.target.dataset.index, 1);
-                renderSchemaBuilder();
-            };
+            div.querySelector('.schema-type').onchange = (e) => { div.querySelector('.schema-options').classList.toggle('hidden', e.target.value !== 'select'); };
+            div.querySelector('.remove-field-btn').onclick = (e) => { project.point_schema.splice(e.target.dataset.index, 1); renderSchemaBuilder(); };
             return div;
         }
 
@@ -560,64 +480,175 @@
             renderSchemaBuilder();
         }
 
-        async function saveSettings() {
-            const newSchema = [];
-            document.querySelectorAll('#schemaBuilder > div').forEach(row => {
-                const name = row.querySelector('.schema-name').value.trim();
-                const type = row.querySelector('.schema-type').value;
-                const options = row.querySelector('.schema-options').value.split(',').map(s => s.trim()).filter(Boolean);
-                if (name) {
-                    newSchema.push({ name, type, options });
-                }
+        // --- POINT EDITOR ---
+        function renderPointEditor(featureId = null) {
+            let feature = null;
+            if (featureId) {
+                feature = geojsonData.features.find(f => f.properties.id === featureId);
+            }
+
+            ui.pointEditorContainer.innerHTML = '';
+            const form = document.createElement('form');
+            form.className = 'panel border p-3 rounded-lg bg-gray-50';
+            const title = document.createElement('p');
+            title.className = 'text-md font-semibold text-center text-blue-800 p-2 rounded-lg';
+            title.textContent = featureId ? 'Editing Point' : 'New Point';
+            form.appendChild(title);
+
+            (project.point_schema || []).forEach(field => {
+                const value = feature ? feature.properties[field.name] : '';
+                form.appendChild(createFormField(field, value));
             });
-            await sendSettings({ point_schema: newSchema });
-            project.point_schema = newSchema;
-            closeSettingsModal();
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'submit';
+            saveBtn.className = 'w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg';
+            saveBtn.textContent = 'Save';
+            form.appendChild(saveBtn);
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'w-full mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => { ui.pointEditorContainer.innerHTML = ''; };
+            form.appendChild(cancelBtn);
+
+            if (featureId) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'w-full mt-2 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg';
+                deleteBtn.textContent = 'Delete Point';
+                deleteBtn.onclick = async () => {
+                    if (confirm('Are you sure you want to delete this point?')) {
+                        await deletePoint(featureId);
+                        ui.pointEditorContainer.innerHTML = '';
+                    }
+                };
+                form.appendChild(deleteBtn);
+            }
+
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                await savePointFromForm(form, featureId);
+            };
+
+            ui.pointEditorContainer.appendChild(form);
         }
         
-        // --- WEBSOCKET HANDLING ---
-        function setupWebSocket() {
-            const ws = new WebSocket(WS_HOST);
-            ws.onopen = () => { ui.connectionStatus.textContent = 'Connected'; ui.connectionStatus.className = 'connected'; };
-            ws.onmessage = (event) => handleWebSocketMessage(JSON.parse(event.data));
-            ws.onclose = () => { ui.connectionStatus.textContent = 'Disconnected'; ui.connectionStatus.className = 'disconnected'; setTimeout(setupWebSocket, 3000); };
-            ws.onerror = () => ws.close();
+        async function savePointFromForm(form, featureId) {
+            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
+            const properties = { id: featureId || `feature-${Date.now()}` };
+            let geometry;
+
+            for (const field of project.point_schema) {
+                const input = form.querySelector(`[name="${field.name}"]`);
+                if (field.type === 'image') {
+                    if (input.files && input.files[0]) properties[field.name] = await getFileDataUrl(input.files[0]);
+                    else properties[field.name] = input.dataset.currentImage || null;
+                } else {
+                    properties[field.name] = input.value;
+                }
+            }
+
+            if (featureId) {
+                geometry = geojsonData.features.find(f => f.properties.id === featureId).geometry;
+            } else {
+                const center = planMap.getCenter();
+                geometry = { type: 'Point', coordinates: [center.lng, center.lat] };
+            }
+            
+            const feature = { type: "Feature", properties, geometry };
+            await fetch('/api/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feature) });
+            ui.pointEditorContainer.innerHTML = '';
         }
         
-        function handleWebSocketMessage(message) {
-            switch(message.type) {
-                case 'point_update':
-                    const index = geojsonData.features.findIndex(f => f.properties.id === message.payload.properties.id);
-                    if (index > -1) geojsonData.features[index] = message.payload;
-                    else geojsonData.features.push(message.payload);
-                    renderPoints();
-                    renderPointList();
-                    break;
-                case 'point_delete':
-                    geojsonData.features = geojsonData.features.filter(f => f.properties.id !== message.payload.id);
-                    renderPoints();
-                    renderPointList();
-                    break;
-                case 'plan_update':
-                case 'project_import':
-                case 'settings_update':
-                     loadProject(); // Simplest way to get all changes
-                    break;
+         async function deletePoint(featureId) {
+            if (IS_PREVIEW) return;
+            try {
+                const response = await fetch(`/api/points/${featureId}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('Failed to delete point on server.');
+            } catch (err) {
+                alert(err.message);
             }
         }
 
-        // --- UTILITY FUNCTIONS ---
+        // --- PLAN UPLOAD ---
+        async function handlePlanUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 25 * 1024 * 1024) { alert("File is too large. Please select a file smaller than 25MB."); ui.planUploader.value = ''; return; }
+            if (IS_PREVIEW) { return alert("This feature is disabled in preview mode."); }
+
+            ui.loadingOverlay.textContent = 'Processing file...'; ui.loadingOverlay.style.display = 'flex';
+            try {
+                let dataUrl;
+                if (file.type === 'application/pdf') {
+                    ui.loadingOverlay.textContent = 'Rendering PDF...';
+                    ({ dataUrl } = await renderPdfToDataUrl(file));
+                } else {
+                    ui.loadingOverlay.textContent = 'Reading image...';
+                    dataUrl = await getFileDataUrl(file);
+                }
+                ui.loadingOverlay.textContent = 'Uploading to server...';
+                const response = await fetch('/api/project/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planDataUrl: dataUrl }) });
+                if (!response.ok) { let errorMsg = `Server error ${response.status}`; try { const ed = await response.json(); errorMsg = ed.message || errorMsg; } catch(e){} throw new Error(errorMsg); }
+            } catch(err) { alert(`Upload error: ${err.message}`); } 
+            finally { ui.loadingOverlay.style.display = 'none'; ui.planUploader.value = ''; }
+        }
+
+        // --- WEBSOCKET ---
+        function setupWebSocket() {
+            const ws = new WebSocket(WS_HOST);
+            ws.onopen = () => { ui.connectionStatus.textContent = 'Connected'; ui.connectionStatus.className = 'connected'; };
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type.includes('update') || message.type.includes('delete')) {
+                    loadProjectData();
+                }
+            };
+            ws.onclose = () => { ui.connectionStatus.textContent = 'Disconnected'; ui.connectionStatus.className = 'disconnected'; setTimeout(setupWebSocket, 3000); };
+            ws.onerror = () => ws.close();
+        }
+
+        // --- UTILITIES ---
         function getFileDataUrl(file) { return new Promise((res, rej) => { if (!file) return res(null); const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
         function getImageDimensions(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res({width: i.width, height: i.height}); i.onerror = rej; i.src = src; }); }
-        async function renderPdfToDataUrl(file) { 
-            const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; 
-            const page = await pdf.getPage(1); 
-            const viewport = page.getViewport({ scale: 2.0 }); 
-            const canvas = document.createElement('canvas'); 
-            canvas.height = viewport.height; 
-            canvas.width = viewport.width; 
-            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; 
-            return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; 
+        async function renderPdfToDataUrl(file) { const pdf = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise; const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 2.0 }); const canvas = document.createElement('canvas'); canvas.height = viewport.height; canvas.width = viewport.width; await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise; return { dataUrl: canvas.toDataURL(), dimensions: { width: canvas.width, height: canvas.height } }; }
+        function createFormField(field, value) {
+            const container = document.createElement('div');
+            container.className = 'mt-3';
+            const label = document.createElement('label');
+            label.textContent = field.name;
+            label.className = 'block text-sm font-medium text-gray-700';
+            container.appendChild(label);
+            let input;
+            switch(field.type) {
+                case 'select':
+                    input = document.createElement('select');
+                    (field.options || []).forEach(opt => {
+                        const option = document.createElement('option'); option.value = opt; option.textContent = opt;
+                        if (opt === value) option.selected = true;
+                        input.appendChild(option);
+                    });
+                    break;
+                case 'textarea':
+                    input = document.createElement('textarea'); input.rows = 3; input.value = value || '';
+                    break;
+                case 'image':
+                     input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
+                     input.dataset.currentImage = value || '';
+                     if (value) {
+                         const preview = document.createElement('img'); preview.src = value; preview.className = 'w-16 h-16 mt-1 object-cover rounded';
+                         container.appendChild(preview);
+                     }
+                     break;
+                default:
+                    input = document.createElement('input'); input.type = field.type; input.value = value || '';
+            }
+            input.id = `field-${field.name}`; input.name = field.name;
+            input.className = 'mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm';
+            container.appendChild(input);
+            return container;
         }
     </script>
 </body>
