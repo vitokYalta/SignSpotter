@@ -28,7 +28,7 @@ app.use(express.json({ limit: '50mb' }));
 async function initializeDatabase() {
   const client = await pool.connect();
   try {
-    // A table for the main project/map plan
+    // 1. Create project table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS project (
         id VARCHAR(50) PRIMARY KEY,
@@ -37,19 +37,38 @@ async function initializeDatabase() {
         plan_height NUMERIC
       );
     `);
-    // The table for points, linked to a project with cascading delete
+
+    // 2. Create points table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS points (
         id VARCHAR(255) PRIMARY KEY,
-        project_id VARCHAR(50) REFERENCES project(id) ON DELETE CASCADE,
         properties JSONB,
         geometry JSONB
       );
     `);
-    // Ensure our single default project exists
+
+    // 3. **MIGRATION**: Check if 'project_id' column exists in 'points' table
+    const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='points' AND column_name='project_id'
+    `);
+
+    if (columnCheck.rowCount === 0) {
+        // If column does not exist, add it. This is a safe, one-time operation.
+        console.log('Column "project_id" not found in "points". Adding it now...');
+        await client.query(`
+            ALTER TABLE points 
+            ADD COLUMN project_id VARCHAR(50) REFERENCES project(id) ON DELETE CASCADE;
+        `);
+        console.log('Column "project_id" added successfully.');
+    }
+
+    // 4. Ensure our single default project exists
     await client.query(`
         INSERT INTO project (id) VALUES ('default') ON CONFLICT (id) DO NOTHING;
     `);
+    
     console.log('Database tables are ready.');
   } catch (err) {
     console.error('Error initializing database tables', err.stack);
