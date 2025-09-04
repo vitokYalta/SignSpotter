@@ -145,6 +145,14 @@
         let project = { id: 'default' };
         let geojsonData = { type: "FeatureCollection", features: [] };
         
+        // --- CONSTANTS FOR API & WEBSOCKET URLS ---
+        // Handles local previewers (like blob URLs) where origin is 'null'
+        const IS_SANDBOXED = window.location.origin === 'null' || window.location.origin === undefined;
+        const API_HOST = IS_SANDBOXED ? 'http://localhost:3000' : window.location.origin;
+        const WS_HOST = IS_SANDBOXED 
+            ? 'ws://localhost:3000' 
+            : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+
         // --- UI ELEMENTS ---
         const planUploader = document.getElementById('planUploader');
         const addPointBtn = document.getElementById('addPointBtn');
@@ -216,7 +224,7 @@
         // --- DATA HANDLING ---
         async function loadProject() {
             try {
-                const response = await fetch('/api/project');
+                const response = await fetch(`${API_HOST}/api/project`);
                 if (!response.ok) throw new Error('Failed to fetch project');
                 const data = await response.json();
                 project = data.project;
@@ -230,7 +238,7 @@
         
         async function savePoint(feature) {
              try {
-                const response = await fetch('/api/points', {
+                const response = await fetch(`${API_HOST}/api/points`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(feature)
@@ -243,7 +251,7 @@
         
         async function deletePoint(id) {
             try {
-                const response = await fetch(`/api/points/${id}`, { method: 'DELETE' });
+                const response = await fetch(`${API_HOST}/api/points/${id}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error('Failed to delete point');
             } catch (error) {
                 console.error('Error deleting point:', error);
@@ -252,9 +260,7 @@
 
         // --- REAL-TIME & EVENT HANDLING ---
         function setupWebSocket() {
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}`;
-            const ws = new WebSocket(wsUrl);
+            const ws = new WebSocket(WS_HOST);
 
             ws.onopen = () => {
                 connectionStatusEl.textContent = 'Connected';
@@ -436,7 +442,7 @@
             }
             
             try {
-                await fetch('/api/project/plan', {
+                await fetch(`${API_HOST}/api/project/plan`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planDataUrl, width, height })
@@ -452,7 +458,7 @@
                 try {
                     const data = JSON.parse(event.target.result);
                     if (!data.project || !data.geojsonData) throw new Error("Invalid project file");
-                    await fetch('/api/project/import', {
+                    await fetch(`${API_HOST}/api/project/import`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data)
                     });
@@ -504,7 +510,7 @@ function initMap(){ map = L.map('map', { crs: L.CRS.Simple, minZoom: -5, zoomCon
 function renderGeoJson(){ if (geojsonLayer) geojsonLayer.remove(); geojsonLayer = L.geoJSON(currentGeojsonData, { pointToLayer: (f, l) => L.circleMarker(l, { radius: 8, fillColor: STATUS_COLORS[f.properties.status] || f.properties.color, color: "#000", weight: 1, opacity: 1, fillOpacity: 0.9 }), onEachFeature: (f, l) => { l.on('click', () => { l.bindPopup(createPopupContent(f.properties), { minWidth: 220 }).openPopup(); const s = document.getElementById('popup-status-' + f.properties.id); if(s) s.addEventListener('change', (e) => updatePointStatus(f.properties.id, e.target.value, l)); }); } }).addTo(map); }
 function createPopupContent(p){ const o = Object.keys(STATUS_COLORS).map(opt => \`<option value="\${opt}" \${p.status === opt ? 'selected' : ''}>\${opt}</option>\`).join(''); return \`<div style="display:flex;flex-direction:column;gap:8px;"><p style="font-weight:bold;font-size:16px;">\${p.name||'Untitled'}</p>\${p.signImage ? \`<img src="\${p.signImage}" alt="Sign" class="popup-img">\` : ''}<div><label style="font-weight:600;display:block;">Status:</label><select id="popup-status-\${p.id}" class="popup-status-select">\${o}</select></div>\${p.notes ? \`<p><b>Notes:</b> \${p.notes.replace(/\\n/g, '<br>')}</p>\` : ''}</div>\`; }
 function updatePointStatus(id, newStatus, layer){ const f = currentGeojsonData.features.find(ft => ft.properties.id === id); if (f) { f.properties.status = newStatus; layer.setStyle({ fillColor: STATUS_COLORS[newStatus] }); saveData(); layer.closePopup(); } }
-function showToast(msg, dur = 3000){ clearTimeout(toastTimeout); toast.textContent = msg; toast.classList.add('show'); toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, dur); }
+function showToast(msg, dur = 3000){ clearTimeout(toastTimeout); toast.textContent = msg; toast.classList.add('show'); toast.classList.remove('show'); }
 <\/script></body></html>`;
         }
     </script>
