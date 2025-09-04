@@ -21,7 +21,8 @@ const pool = new Pool({
 
 // --- MIDDLEWARE ---
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json({ limit: '25mb' })); // Increased limit for plan and sign images
+// Increased limit to 50mb to handle large SVG/PDF data in JSON payloads
+app.use(express.json({ limit: '50mb' })); 
 
 // --- DATABASE SETUP ---
 async function initializeDatabase() {
@@ -176,7 +177,7 @@ app.post('/api/project/import', async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK'); // Rollback on error
         console.error('Error importing project', err.stack);
-        res.status(500).send('Server Error');
+        res.status(500).send('Server Error: ' + err.message);
     } finally {
         client.release();
     }
